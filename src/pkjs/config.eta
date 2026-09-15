@@ -146,11 +146,26 @@
           </div>
           <p class="sub" id="ha-sensors"></p>
           <legend>Home temperature sensor</legend>
-          <input type="text" class="search" id="ha-search" placeholder="Search sensors…" autocapitalize="off" autocorrect="off" spellcheck="false">
-          <div class="picker">
-            <div class="picker-list" id="ha-picker"></div>
+
+          <!-- A sensor is chosen: show it with a Remove button (no list). -->
+          <div id="ha-selected" style="display:none">
+            <div class="picker-item selected">
+              <div class="meta">
+                <div class="name" id="ha-selected-name"></div>
+                <div class="area" id="ha-selected-area"></div>
+              </div>
+            </div>
+            <button type="button" class="secondary" id="ha-remove">Remove sensor</button>
           </div>
-          <p class="hint">Pick the temperature sensor for the home badge, then go back and tap <strong>Save</strong> in Settings. Names and areas come from Home Assistant.</p>
+
+          <!-- No sensor chosen yet: search + selectable list. -->
+          <div id="ha-picker-wrap">
+            <input type="text" class="search" id="ha-search" placeholder="Search sensors…" autocapitalize="off" autocorrect="off" spellcheck="false">
+            <div class="picker">
+              <div class="picker-list" id="ha-picker"></div>
+            </div>
+            <p class="hint">Pick the temperature sensor for the home badge, then go back and tap <strong>Save</strong> in Settings. Names and areas come from Home Assistant.</p>
+          </div>
           <button type="button" class="danger" id="ha-disconnect">Disconnect Home Assistant</button>
         </div>
       </div>
@@ -234,12 +249,14 @@
       }
       function renderPicker(query) {
         pickerEl.innerHTML = '';
-        var rows = [{ entity_id: '', name: 'None', area: 'No home temperature badge' }];
+        var rows = [];
         allSensors.forEach(function (s) { if (matches(s, query)) rows.push(s); });
-        if (rows.length === 1 && (query || '').trim() !== '') {
+        if (rows.length === 0) {
           var empty = document.createElement('div');
           empty.className = 'picker-empty';
-          empty.textContent = 'No sensors match "' + query + '".';
+          empty.textContent = (query || '').trim() !== ''
+            ? 'No sensors match "' + query + '".'
+            : 'No temperature sensors available.';
           pickerEl.appendChild(empty);
           return;
         }
@@ -272,6 +289,30 @@
         renderPicker('');
       }
 
+      // Toggle between the "chosen sensor + Remove" view and the search/list.
+      // When a sensor is selected we hide the list entirely and just show it.
+      var selectedBox = document.getElementById('ha-selected');
+      var pickerWrap = document.getElementById('ha-picker-wrap');
+      function sensorById(id) {
+        for (var i = 0; i < allSensors.length; i++) {
+          if (allSensors[i].entity_id === id) return allSensors[i];
+        }
+        return null;
+      }
+      function applySensorSelection() {
+        var chosen = selectedSensor && selectedSensor.length > 0;
+        if (selectedBox) selectedBox.style.display = chosen ? 'block' : 'none';
+        if (pickerWrap) pickerWrap.style.display = chosen ? 'none' : 'block';
+        if (chosen) {
+          var s = sensorById(selectedSensor);
+          document.getElementById('ha-selected-name').textContent =
+            (s && s.name) ? s.name : selectedSensor;
+          var areaEl = document.getElementById('ha-selected-area');
+          areaEl.textContent = (s && s.area) ? s.area : '';
+          areaEl.style.display = (s && s.area) ? 'block' : 'none';
+        }
+      }
+
       // One-time population of the connected view's URL, sensor count and
       // picker. Visibility is handled by applyConnected() below.
       if (HA.connected) {
@@ -280,6 +321,7 @@
         document.getElementById('ha-sensors').textContent =
           n + (n === 1 ? ' temperature sensor available.' : ' temperature sensors available.');
         buildPicker(HA.list || []);
+        applySensorSelection();
       }
 
       // connectedDraft is the in-page connection state. It only becomes the
@@ -320,11 +362,25 @@
             items[i].className = 'picker-item' +
               (items[i].getAttribute('data-id') === selectedSensor ? ' selected' : '');
           }
+          // Picking a real sensor collapses the list to the chosen-sensor view.
+          applySensorSelection();
         });
         var search = document.getElementById('ha-search');
         if (search) {
           search.addEventListener('input', function () { renderPicker(search.value); });
         }
+      }
+
+      // Remove clears the selection and brings the search/list back.
+      var removeBtn = document.getElementById('ha-remove');
+      if (removeBtn) {
+        removeBtn.addEventListener('click', function () {
+          selectedSensor = '';
+          renderPicker('');
+          var search = document.getElementById('ha-search');
+          if (search) search.value = '';
+          applySensorSelection();
+        });
       }
 
       // --- OAuth login (navigates away to HA, then closes via the callback) --
