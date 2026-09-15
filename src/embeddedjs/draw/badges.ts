@@ -3,7 +3,7 @@
  * top of the face, each showing a small icon + short text (date, weather, steps).
  */
 
-import { render, badgeFont, iconImage, DCImage, Palette, HOME_TEMP_COLOR } from "gfx";
+import { render, badgeFont, iconImage, DCImage, Palette } from "gfx";
 import {
   ICON_SIZE,
   PILL_PAD_X,
@@ -37,8 +37,6 @@ export interface Rect {
 interface Badge {
   icon: DCImage;
   text: string;
-  /** Optional badge-specific text colour (defaults to the palette's pillText). */
-  textColor?: number;
 }
 
 /** Builds the visible badges (left→right) from settings + live data. */
@@ -80,7 +78,6 @@ function buildBadges(now: Date): Badge[] {
         badges.push({
           icon: iconImage(Icon.HomeThermometer),
           text: formatTemperature(settings.homeTemp, unit),
-          textColor: HOME_TEMP_COLOR,
         });
       }
     }
@@ -188,6 +185,5 @@ function drawPill(
     15,
   );
   render.drawDCI(badge.icon, x + PILL_PAD_X, iconY);
-  const textColor = badge.textColor === undefined ? palette.pillText : badge.textColor;
-  render.drawText(badge.text, badgeFont, textColor, x + PILL_PAD_X + ICON_SIZE + ICON_GAP, textY);
+  render.drawText(badge.text, badgeFont, palette.pillText, x + PILL_PAD_X + ICON_SIZE + ICON_GAP, textY);
 }

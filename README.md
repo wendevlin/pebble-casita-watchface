@@ -167,7 +167,7 @@ overlapped. Their left-to-right order is configurable from the settings page
 | Temperature | `thermometer`    | Fetched by the phone (Open-Meteo)   | One decimal, no unit letter, e.g. `24,8°`     |
 | Steps       | `shoe-print`     | Pebble Health on the watch          | `56` (<100), `0,4K` (100–999), `12K` (≥1000)  |
 | Battery     | `battery`        | The watch battery (native FFI)      | Whole percent, e.g. `85%`; icon coloured by level |
-| Home temp   | `home-thermometer` | A Home Assistant sensor (phone)   | One decimal, no unit letter, e.g. `21,3°` (deep-orange) |
+| Home temp   | `home-thermometer` | A Home Assistant sensor (phone)   | One decimal, no unit letter, e.g. `21,3°`      |
 
 - **Weather** is fetched by `src/pkjs/index.ts` using the phone's location and
   the keyless [Open-Meteo](https://open-meteo.com/) API (on launch, every 30
@@ -192,10 +192,10 @@ overlapped. Their left-to-right order is configurable from the settings page
   the watch by the phone over the Home Assistant WebSocket API (see the Home
   Assistant section above) and sent in tenths of a degree Celsius via the
   `HA_TEMP` key. Like the weather badge it is displayed in °C/°F per the watch's
-  own units setting, but its icon and value are tinted a distinct **deep-orange**
-  so it reads apart from the blue Open-Meteo temperature. The badge only appears
-  when Home Assistant is connected, a sensor is chosen, and a reading has been
-  received.
+  own units setting, with the same text colour as the other badges, but its
+  **icon** is a distinct **deep-orange** (baked into the PDC) so it reads apart
+  from the blue Open-Meteo thermometer. The badge only appears when Home
+  Assistant is connected, a sensor is chosen, and a reading has been received.
 
 The MDI icons are converted to PDC by the `resources` script (see below); the
 sources live in `mdi-svgs/` with an accent fill baked in.

@@ -129,8 +129,3 @@ const DARK: Palette = {
 export function paletteFor(theme: Theme): Palette {
   return theme === "dark" ? DARK : LIGHT;
 }
-
-// Distinct accent for the Home Assistant home-temperature badge, so it reads
-// differently from the default (Home Assistant blue) weather thermometer. Warm
-// deep-orange; the watch snaps this to its nearest 2-bit-per-channel colour.
-export const HOME_TEMP_COLOR = render.makeColor(0xff, 0x70, 0x43);
