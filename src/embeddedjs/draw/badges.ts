@@ -3,7 +3,7 @@
  * top of the face, each showing a small icon + short text (date, weather, steps).
  */
 
-import { render, badgeFont, iconImage, DCImage, Palette } from "gfx";
+import { render, badgeFont, iconImage, DCImage, Palette, HOME_TEMP_COLOR } from "gfx";
 import {
   ICON_SIZE,
   PILL_PAD_X,
@@ -23,6 +23,7 @@ import {
   formatSteps,
   formatTemperature,
   tempUnitForSystem,
+  WEATHER_UNKNOWN,
 } from "logic";
 import { settings, readBattery, readSteps, measurementSystem } from "data/settings";
 
@@ -36,6 +37,8 @@ export interface Rect {
 interface Badge {
   icon: DCImage;
   text: string;
+  /** Optional badge-specific text colour (defaults to the palette's pillText). */
+  textColor?: number;
 }
 
 /** Builds the visible badges (left→right) from settings + live data. */
@@ -67,6 +70,18 @@ function buildBadges(now: Date): Badge[] {
         if (percent !== null) {
           badges.push({ icon: iconImage(batteryIcon(percent)), text: formatBattery(percent) });
         }
+      }
+    } else if (id === "home") {
+      // Home Assistant sensor temperature. Only shown once the phone has pushed
+      // a reading (homeTemp leaves the WEATHER_UNKNOWN sentinel) and the badge
+      // is enabled; coloured distinctly from the default weather thermometer.
+      if (settings.showHomeTemp && settings.homeTemp !== WEATHER_UNKNOWN) {
+        const unit = tempUnitForSystem(measurementSystem());
+        badges.push({
+          icon: iconImage(Icon.HomeThermometer),
+          text: formatTemperature(settings.homeTemp, unit),
+          textColor: HOME_TEMP_COLOR,
+        });
       }
     }
   }
@@ -159,5 +174,6 @@ function drawPill(
     15,
   );
   render.drawDCI(badge.icon, x + PILL_PAD_X, iconY);
-  render.drawText(badge.text, badgeFont, palette.pillText, x + PILL_PAD_X + ICON_SIZE + ICON_GAP, textY);
+  const textColor = badge.textColor === undefined ? palette.pillText : badge.textColor;
+  render.drawText(badge.text, badgeFont, textColor, x + PILL_PAD_X + ICON_SIZE + ICON_GAP, textY);
 }

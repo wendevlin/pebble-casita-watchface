@@ -28,6 +28,7 @@ const html = eta.renderString(template, {
     { name: "weather", label: "Temperature" },
     { name: "steps", label: "Steps" },
     { name: "battery", label: "Battery" },
+    { name: "home", label: "Home temperature" },
   ],
 });
 

@@ -28,6 +28,11 @@ import {
   parseSensorList,
   sensorsFromStates,
   normalizeHaUrl,
+  wsUrlFromHttp,
+  wsAuthMessage,
+  wsSubscribeEntitiesMessage,
+  parseWsStateUpdate,
+  stateToTenthsC,
   type HaSensor,
 } from "./ha";
 
@@ -52,6 +57,7 @@ interface Config {
   battery: boolean;
   order: string[];
   seconds: boolean;
+  home: boolean;
   ha: HaConfig;
   view: string;
 }
@@ -60,9 +66,9 @@ interface Config {
 // the compact code string "dwsb" (date/weather/steps/battery). Kept as a tiny
 // local copy so the phone bundle stays self-contained (it can't import the
 // watch modules).
-const BADGE_IDS = ["date", "weather", "steps", "battery"];
-const BADGE_CODE: { [id: string]: string } = { date: "d", weather: "w", steps: "s", battery: "b" };
-const BADGE_BY_CODE: { [code: string]: string } = { d: "date", w: "weather", s: "steps", b: "battery" };
+const BADGE_IDS = ["date", "weather", "steps", "battery", "home"];
+const BADGE_CODE: { [id: string]: string } = { date: "d", weather: "w", steps: "s", battery: "b", home: "h" };
+const BADGE_BY_CODE: { [code: string]: string } = { d: "date", w: "weather", s: "steps", b: "battery", h: "home" };
 
 function normalizeBadgeOrder(value: string[] | string | null): string[] {
   let tokens: string[];
@@ -197,6 +203,7 @@ function configPage(
     battery: showBattery,
     order: order,
     seconds: showSeconds,
+    home: boolPref("showHomeTemp", true),
     ha: haStatus(),
     view: initialView === "ha" ? "ha" : "main",
   };
@@ -219,6 +226,14 @@ function openConfig(initialView: string): void {
   );
 }
 
+function homeBadgeActive(): boolean {
+  return (
+    committedConnected() &&
+    !!localStorage.getItem("haSensorEntity") &&
+    boolPref("showHomeTemp", true)
+  );
+}
+
 function sendSettings(): void {
   Pebble.sendAppMessage(
     {
@@ -229,10 +244,21 @@ function sendSettings(): void {
       SHOW_BATTERY: boolPref("showBattery", true) ? 1 : 0,
       BADGE_ORDER: badgeOrderToCode(currentBadgeOrder()),
       SHOW_SECONDS: boolPref("showSeconds", false) ? 1 : 0,
+      SHOW_HOME_TEMP: homeBadgeActive() ? 1 : 0,
     },
     function () {},
     function (e) {
       console.log("Casita: failed to send settings: " + JSON.stringify(e));
+    }
+  );
+}
+
+function sendHomeTemp(tenthsC: number): void {
+  Pebble.sendAppMessage(
+    { HA_TEMP: tenthsC },
+    function () {},
+    function (e) {
+      console.log("Casita: failed to send home temp: " + JSON.stringify(e));
     }
   );
 }
@@ -285,10 +311,166 @@ function fetchWeather(): void {
   );
 }
 
+// --- Home Assistant live temperature (WebSocket) ---------------------------
+// Subscribes to the selected sensor over HA's WebSocket API and pushes each new
+// reading to the watch as HA_TEMP (tenths of a degree Celsius). If the runtime
+// has no WebSocket, it falls back to periodic REST polling. The feed is
+// (re)started whenever the committed connection/sensor changes and stopped on
+// disconnect or when the home badge is turned off.
+
+const HA_WS_RECONNECT_MS = 15000;
+const HA_POLL_MS = 60000;
+let haWs: WebSocket | null = null;
+let haWsWantOpen = false;
+let haWsReconnectTimer: ReturnType<typeof setTimeout> | undefined;
+let haPollTimer: ReturnType<typeof setInterval> | undefined;
+let haWsEntity = "";
+let haWsUnit: string | null = null;
+
+function haCurrentEntity(): string {
+  return localStorage.getItem("haSensorEntity") || "";
+}
+
+/** Convert a raw state/unit to tenths °C and forward it to the watch. */
+function pushHomeTemp(state: string | null, unit: string | null): void {
+  if (unit) haWsUnit = unit;
+  const tenths = stateToTenthsC(state, unit || haWsUnit);
+  if (tenths !== null) sendHomeTemp(tenths);
+}
+
+function stopHaLiveTemp(): void {
+  haWsWantOpen = false;
+  if (haWsReconnectTimer !== undefined) {
+    clearTimeout(haWsReconnectTimer);
+    haWsReconnectTimer = undefined;
+  }
+  if (haPollTimer !== undefined) {
+    clearInterval(haPollTimer);
+    haPollTimer = undefined;
+  }
+  if (haWs) {
+    try {
+      haWs.onopen = null;
+      haWs.onmessage = null;
+      haWs.onerror = null;
+      haWs.onclose = null;
+      haWs.close();
+    } catch (e) {
+      // ignore
+    }
+    haWs = null;
+  }
+}
+
+function scheduleHaWsReconnect(): void {
+  if (!haWsWantOpen || haWsReconnectTimer !== undefined) return;
+  haWsReconnectTimer = setTimeout(function () {
+    haWsReconnectTimer = undefined;
+    openHaWs();
+  }, HA_WS_RECONNECT_MS);
+}
+
+function openHaWs(): void {
+  const url = localStorage.getItem("haUrl") || "";
+  const token = localStorage.getItem("haAccessToken") || "";
+  const entity = haCurrentEntity();
+  if (!url || !token || !entity) return;
+  haWsEntity = entity;
+  if (typeof WebSocket === "undefined") {
+    startHaPolling();
+    return;
+  }
+  let ws: WebSocket;
+  try {
+    ws = new WebSocket(wsUrlFromHttp(url));
+  } catch (e) {
+    console.log("Casita: HA ws open failed, polling instead: " + e);
+    startHaPolling();
+    return;
+  }
+  haWs = ws;
+  ws.onmessage = function (ev: MessageEvent) {
+    let msg: { type?: string };
+    try {
+      msg = JSON.parse(String(ev.data));
+    } catch (e) {
+      return;
+    }
+    if (msg.type === "auth_required") {
+      ws.send(wsAuthMessage(token));
+      return;
+    }
+    if (msg.type === "auth_invalid") {
+      // Token likely expired: refresh and let the reconnect pick up the new one.
+      console.log("Casita: HA ws auth invalid, refreshing token");
+      try {
+        ws.close();
+      } catch (e) {
+        // ignore
+      }
+      refreshHaToken(function () {
+        scheduleHaWsReconnect();
+      });
+      return;
+    }
+    if (msg.type === "auth_ok") {
+      ws.send(wsSubscribeEntitiesMessage(1, haWsEntity));
+      return;
+    }
+    const upd = parseWsStateUpdate(msg, haWsEntity);
+    if (upd) pushHomeTemp(upd.state, upd.unit);
+  };
+  ws.onerror = function () {
+    // onclose fires next and handles the reconnect.
+  };
+  ws.onclose = function () {
+    if (haWs === ws) haWs = null;
+    scheduleHaWsReconnect();
+  };
+}
+
+function startHaPolling(): void {
+  if (haPollTimer !== undefined) return;
+  const poll = function () {
+    const url = localStorage.getItem("haUrl") || "";
+    const token = localStorage.getItem("haAccessToken") || "";
+    const entity = haCurrentEntity();
+    if (!url || !token || !entity) return;
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", url + "/api/states/" + encodeURIComponent(entity), true);
+    xhr.setRequestHeader("Authorization", "Bearer " + token);
+    xhr.onload = function () {
+      try {
+        const e = JSON.parse(xhr.responseText);
+        pushHomeTemp(
+          e && e.state != null ? String(e.state) : null,
+          e && e.attributes ? e.attributes.unit_of_measurement || null : null,
+        );
+      } catch (err) {
+        // ignore
+      }
+    };
+    xhr.send();
+  };
+  poll();
+  haPollTimer = setInterval(poll, HA_POLL_MS);
+}
+
+/** (Re)start or stop the live temperature feed to match the committed config. */
+function syncHaLiveTemp(): void {
+  stopHaLiveTemp();
+  if (homeBadgeActive()) {
+    haWsWantOpen = true;
+    haWsUnit = null;
+    openHaWs();
+  }
+}
+
 Pebble.addEventListener("ready", function () {
   sendSettings();
   fetchWeather();
   setInterval(fetchWeather, WEATHER_REFRESH_MS);
+  syncHaLiveTemp();
 });
 
 // --- Home Assistant OAuth (phone-side) -------------------------------------
@@ -533,6 +715,7 @@ Pebble.addEventListener("webviewclosed", function (e) {
   localStorage.setItem("showBattery", config.battery ? "1" : "0");
   localStorage.setItem("badgeOrder", badgeOrderToCode(normalizeBadgeOrder(config.order)));
   localStorage.setItem("showSeconds", config.seconds ? "1" : "0");
+  localStorage.setItem("showHomeTemp", config.home ? "1" : "0");
   // The HA connection is committed here, on Save, from the page's draft state:
   //   haConnected === false -> the user disconnected (or never connected): clear
   //                            everything.
@@ -552,4 +735,6 @@ Pebble.addEventListener("webviewclosed", function (e) {
   }
   sendSettings();
   fetchWeather();
+  // Restart the live temperature feed to match the freshly-saved sensor/toggle.
+  syncHaLiveTemp();
 });

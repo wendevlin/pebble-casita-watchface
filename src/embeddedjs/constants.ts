@@ -16,6 +16,8 @@ export const SHOW_BATTERY_KEY = "showBattery";
 export const WEATHER_TEMP_KEY = "weatherTemp";
 export const BADGE_ORDER_KEY = "badgeOrder";
 export const SHOW_SECONDS_KEY = "showSeconds";
+export const HOME_TEMP_KEY = "homeTemp";
+export const SHOW_HOME_TEMP_KEY = "showHomeTemp";
 
 // --------------------------------------------------------------------------- //
 // AppMessage keys — MUST stay in the same order as package.json `messageKeys`
@@ -31,6 +33,8 @@ export const MESSAGE_KEYS = [
   "BADGE_ORDER",
   "SHOW_SECONDS",
   "SHOW_BATTERY",
+  "HA_TEMP",
+  "SHOW_HOME_TEMP",
 ];
 
 // --------------------------------------------------------------------------- //

@@ -89,7 +89,7 @@
           <p class="hint">Toggle badges and use ▲ ▼ to set their left-to-right order.</p>
           <ul class="badges" id="badges">
             <% it.badges.forEach(function (b) { %>
-            <li class="badge" data-badge="<%= b.name %>">
+            <li class="badge" data-badge="<%= b.name %>"<% if (b.name === 'home') { %> style="display:none"<% } %>>
               <label><input type="checkbox" name="<%= b.name %>"> <%= b.label %></label>
               <span class="reorder">
                 <button type="button" class="up" aria-label="Move up">&#9650;</button>
@@ -153,6 +153,7 @@
               <div class="meta">
                 <div class="name" id="ha-selected-name"></div>
                 <div class="area" id="ha-selected-area"></div>
+                <div class="area" id="ha-selected-value"></div>
               </div>
             </div>
             <button type="button" class="secondary" id="ha-remove">Remove sensor</button>
@@ -180,15 +181,21 @@
       // --- Main settings controls ----------------------------------------
       var themeInput = form.querySelector('input[name=theme][value="' + CFG.theme + '"]');
       if (themeInput) themeInput.checked = true;
-      ['weather', 'steps', 'date', 'battery'].forEach(function (key) {
+      ['weather', 'steps', 'date', 'battery', 'home'].forEach(function (key) {
         var el = form.querySelector('input[name=' + key + ']');
         if (el) el.checked = !!CFG[key];
       });
       var secondsInput = form.querySelector('input[name=seconds]');
       if (secondsInput) secondsInput.checked = !!CFG.seconds;
 
+      // The home-temperature badge only exists when HA is connected AND a sensor
+      // is chosen (draft state). Its <li> is hidden until updateHomeBadge() shows
+      // it, and badgeItems() ignores hidden badges so a hidden home badge never
+      // leaks into the saved order.
+      var homeLi = badgeList.querySelector('li.badge[data-badge="home"]');
       function badgeItems() {
-        return Array.prototype.slice.call(badgeList.querySelectorAll('li.badge'));
+        return Array.prototype.slice.call(badgeList.querySelectorAll('li.badge'))
+          .filter(function (li) { return li.style.display !== 'none'; });
       }
       function refreshArrows() {
         var items = badgeItems();
@@ -213,6 +220,17 @@
         }
         refreshArrows();
       });
+
+      // Reveal/hide the home-temperature badge based on the current draft HA
+      // connection + sensor selection. Called on init and whenever either
+      // changes. Uses connectedDraft/selectedSensor which are declared (var,
+      // hoisted) in the HA section below and assigned before this ever runs.
+      function updateHomeBadge() {
+        if (!homeLi) return;
+        var avail = connectedDraft && selectedSensor && selectedSensor.length > 0;
+        homeLi.style.display = avail ? '' : 'none';
+        refreshArrows();
+      }
 
       // --- View navigation (client-side; does NOT close the page) ---------
       var viewMain = document.getElementById('view-main');
@@ -310,7 +328,12 @@
           var areaEl = document.getElementById('ha-selected-area');
           areaEl.textContent = (s && s.area) ? s.area : '';
           areaEl.style.display = (s && s.area) ? 'block' : 'none';
+          var valEl = document.getElementById('ha-selected-value');
+          var hasVal = s && s.state != null && s.state !== '' && s.state !== 'unknown' && s.state !== 'unavailable';
+          valEl.textContent = hasVal ? ('Now: ' + s.state + (s.unit ? ' ' + s.unit : '')) : '';
+          valEl.style.display = hasVal ? 'block' : 'none';
         }
+        updateHomeBadge();
       }
 
       // One-time population of the connected view's URL, sensor count and
@@ -346,6 +369,7 @@
         // Keep the main-view entry button in sync with the draft state.
         entry.className = isConn ? 'ha-entry connected' : 'ha-entry';
         entryLabel.textContent = isConn ? 'Manage Home Assistant' : 'Connect Home Assistant';
+        updateHomeBadge();
       }
       applyConnected(connectedDraft, false);
 
@@ -466,6 +490,7 @@
           steps: form.querySelector('input[name=steps]').checked,
           date: form.querySelector('input[name=date]').checked,
           battery: form.querySelector('input[name=battery]').checked,
+          home: form.querySelector('input[name=home]').checked,
           order: badgeItems().map(function (li) { return li.getAttribute('data-badge'); }),
           seconds: form.querySelector('input[name=seconds]').checked,
           haConnected: connectedDraft,

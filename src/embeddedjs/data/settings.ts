@@ -7,8 +7,10 @@
 
 import {
   BADGE_ORDER_KEY,
+  HOME_TEMP_KEY,
   SHOW_BATTERY_KEY,
   SHOW_DATE_KEY,
+  SHOW_HOME_TEMP_KEY,
   SHOW_SECONDS_KEY,
   SHOW_STEPS_KEY,
   SHOW_WEATHER_KEY,
@@ -40,10 +42,21 @@ export interface Settings {
   showSeconds: boolean;
   /** Last weather reading in tenths of a degree Celsius (WEATHER_UNKNOWN = none). */
   weatherTemp: number;
+  /** Show the Home Assistant home-temperature badge. */
+  showHomeTemp: boolean;
+  /** Last HA sensor reading in tenths of a degree Celsius (WEATHER_UNKNOWN = none). */
+  homeTemp: number;
 }
 
 function readStoredTemp(): number {
   const raw = localStorage.getItem(WEATHER_TEMP_KEY);
+  if (raw == null) return WEATHER_UNKNOWN;
+  const value = parseInt(raw, 10);
+  return isNaN(value) ? WEATHER_UNKNOWN : value;
+}
+
+function readStoredHomeTemp(): number {
+  const raw = localStorage.getItem(HOME_TEMP_KEY);
   if (raw == null) return WEATHER_UNKNOWN;
   const value = parseInt(raw, 10);
   return isNaN(value) ? WEATHER_UNKNOWN : value;
@@ -59,6 +72,8 @@ export const settings: Settings = {
   badgeOrder: normalizeBadgeOrder(localStorage.getItem(BADGE_ORDER_KEY)),
   showSeconds: normalizeToggle(localStorage.getItem(SHOW_SECONDS_KEY), false),
   weatherTemp: readStoredTemp(),
+  showHomeTemp: normalizeToggle(localStorage.getItem(SHOW_HOME_TEMP_KEY), true),
+  homeTemp: readStoredHomeTemp(),
 };
 
 /**
@@ -101,6 +116,17 @@ export function applyMessage(message: Map<string | number, unknown>): void {
   if (message.has("SHOW_SECONDS")) {
     settings.showSeconds = normalizeToggle(message.get("SHOW_SECONDS"), false);
     localStorage.setItem(SHOW_SECONDS_KEY, settings.showSeconds ? "1" : "0");
+  }
+  if (message.has("HA_TEMP")) {
+    const raw = message.get("HA_TEMP");
+    let temp = typeof raw === "number" ? raw : parseInt(String(raw), 10);
+    if (isNaN(temp)) temp = WEATHER_UNKNOWN;
+    settings.homeTemp = temp;
+    localStorage.setItem(HOME_TEMP_KEY, String(temp));
+  }
+  if (message.has("SHOW_HOME_TEMP")) {
+    settings.showHomeTemp = normalizeToggle(message.get("SHOW_HOME_TEMP"), true);
+    localStorage.setItem(SHOW_HOME_TEMP_KEY, settings.showHomeTemp ? "1" : "0");
   }
 }
 

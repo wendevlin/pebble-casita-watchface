@@ -217,8 +217,8 @@ describe("batteryIcon", () => {
 
 describe("normalizeBadgeOrder", () => {
   test("parses the compact code string", () => {
-    expect(normalizeBadgeOrder("dwsb")).toEqual(["date", "weather", "steps", "battery"]);
-    expect(normalizeBadgeOrder("bswd")).toEqual(["battery", "steps", "weather", "date"]);
+    expect(normalizeBadgeOrder("dwsb")).toEqual(["date", "weather", "steps", "battery", "home"]);
+    expect(normalizeBadgeOrder("bswd")).toEqual(["battery", "steps", "weather", "date", "home"]);
   });
   test("parses comma-separated ids and arrays", () => {
     expect(normalizeBadgeOrder("steps,date,weather,battery")).toEqual([
@@ -226,25 +226,28 @@ describe("normalizeBadgeOrder", () => {
       "date",
       "weather",
       "battery",
+      "home",
     ]);
     expect(normalizeBadgeOrder(["weather", "steps", "date", "battery"])).toEqual([
       "weather",
       "steps",
       "date",
       "battery",
+      "home",
     ]);
   });
   test("appends missing badges in default order", () => {
-    expect(normalizeBadgeOrder("s")).toEqual(["steps", "date", "weather", "battery"]);
-    expect(normalizeBadgeOrder(["weather"])).toEqual(["weather", "date", "steps", "battery"]);
+    expect(normalizeBadgeOrder("s")).toEqual(["steps", "date", "weather", "battery", "home"]);
+    expect(normalizeBadgeOrder(["weather"])).toEqual(["weather", "date", "steps", "battery", "home"]);
   });
   test("ignores unknown and duplicate tokens", () => {
-    expect(normalizeBadgeOrder("wwx")).toEqual(["weather", "date", "steps", "battery"]);
+    expect(normalizeBadgeOrder("wwx")).toEqual(["weather", "date", "steps", "battery", "home"]);
     expect(normalizeBadgeOrder("steps,steps,bogus")).toEqual([
       "steps",
       "date",
       "weather",
       "battery",
+      "home",
     ]);
   });
   test("falls back to the default for junk/empty", () => {
@@ -263,6 +266,7 @@ describe("badgeOrderToCode", () => {
       "steps",
       "date",
       "battery",
+      "home",
     ]);
   });
 });

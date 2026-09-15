@@ -13,6 +13,11 @@ import {
   parseSensorList,
   sensorsFromStates,
   matchesSensorQuery,
+  wsUrlFromHttp,
+  wsAuthMessage,
+  wsSubscribeEntitiesMessage,
+  parseWsStateUpdate,
+  stateToTenthsC,
   HA_SENSOR_TEMPLATE,
   HA_CLIENT_ID,
   HA_REDIRECT_URI,
@@ -128,9 +133,9 @@ describe("parseSensorList", () => {
     ]);
     const list = parseSensorList(text);
     expect(list.length).toBe(2);
-    expect(list[0]).toEqual({ entity_id: "sensor.living", name: "Living Room", area: "Living Room" });
+    expect(list[0]).toEqual({ entity_id: "sensor.living", name: "Living Room", area: "Living Room", state: "", unit: "" });
     // null area becomes "" and missing name would fall back to entity_id
-    expect(list[1]).toEqual({ entity_id: "sensor.out", name: "Outside", area: "" });
+    expect(list[1]).toEqual({ entity_id: "sensor.out", name: "Outside", area: "", state: "", unit: "" });
   });
   test("drops entries without an entity_id and falls back name->id", () => {
     const text = JSON.stringify([
@@ -139,7 +144,7 @@ describe("parseSensorList", () => {
     ]);
     const list = parseSensorList(text);
     expect(list.length).toBe(1);
-    expect(list[0]).toEqual({ entity_id: "sensor.x", name: "sensor.x", area: "" });
+    expect(list[0]).toEqual({ entity_id: "sensor.x", name: "sensor.x", area: "", state: "", unit: "" });
   });
   test("returns [] for junk / non-array", () => {
     expect(parseSensorList("not json")).toEqual([]);
@@ -151,20 +156,20 @@ describe("parseSensorList", () => {
 describe("sensorsFromStates (fallback)", () => {
   test("builds sensors from /api/states with blank area", () => {
     const states = [
-      { entity_id: "sensor.a", attributes: { device_class: "temperature", friendly_name: "A" } },
+      { entity_id: "sensor.a", state: "21.5", attributes: { device_class: "temperature", friendly_name: "A", unit_of_measurement: "°C" } },
       { entity_id: "sensor.b", attributes: { device_class: "temperature" } },
       { entity_id: "sensor.h", attributes: { device_class: "humidity" } },
     ];
     const list = sensorsFromStates(states);
     expect(list).toEqual([
-      { entity_id: "sensor.a", name: "A", area: "" },
-      { entity_id: "sensor.b", name: "sensor.b", area: "" },
+      { entity_id: "sensor.a", name: "A", area: "", state: "21.5", unit: "°C" },
+      { entity_id: "sensor.b", name: "sensor.b", area: "", state: "", unit: "" },
     ]);
   });
 });
 
 describe("matchesSensorQuery", () => {
-  const s = { entity_id: "sensor.living_temp", name: "Living Room", area: "Ground Floor" };
+  const s = { entity_id: "sensor.living_temp", name: "Living Room", area: "Ground Floor", state: "21.0", unit: "°C" };
   test("empty query matches", () => {
     expect(matchesSensorQuery(s, "")).toBe(true);
     expect(matchesSensorQuery(s, "   ")).toBe(true);
@@ -176,5 +181,51 @@ describe("matchesSensorQuery", () => {
   });
   test("no match returns false", () => {
     expect(matchesSensorQuery(s, "kitchen")).toBe(false);
+  });
+});
+
+describe("websocket helpers", () => {
+  test("wsUrlFromHttp maps http->ws and https->wss with /api/websocket", () => {
+    expect(wsUrlFromHttp("https://ha.example.com")).toBe("wss://ha.example.com/api/websocket");
+    expect(wsUrlFromHttp("http://192.168.1.5:8123")).toBe("ws://192.168.1.5:8123/api/websocket");
+  });
+  test("auth + subscribe frames are well-formed JSON", () => {
+    expect(JSON.parse(wsAuthMessage("tok"))).toEqual({ type: "auth", access_token: "tok" });
+    expect(JSON.parse(wsSubscribeEntitiesMessage(3, "sensor.x"))).toEqual({
+      id: 3,
+      type: "subscribe_entities",
+      entity_ids: ["sensor.x"],
+    });
+  });
+});
+
+describe("parseWsStateUpdate", () => {
+  test("reads the initial snapshot (event.a)", () => {
+    const msg = { type: "event", event: { a: { "sensor.x": { s: "21.5", a: { unit_of_measurement: "°C" } } } } };
+    expect(parseWsStateUpdate(msg, "sensor.x")).toEqual({ state: "21.5", unit: "°C" });
+  });
+  test("reads an incremental change (event.c[...]['+'])", () => {
+    const msg = { type: "event", event: { c: { "sensor.x": { "+": { s: "22.1" } } } } };
+    expect(parseWsStateUpdate(msg, "sensor.x")).toEqual({ state: "22.1", unit: null });
+  });
+  test("returns null when nothing for the entity / wrong type", () => {
+    expect(parseWsStateUpdate({ type: "event", event: { a: { "sensor.y": { s: "1" } } } }, "sensor.x")).toBeNull();
+    expect(parseWsStateUpdate({ type: "result" }, "sensor.x")).toBeNull();
+    expect(parseWsStateUpdate(null, "sensor.x")).toBeNull();
+  });
+});
+
+describe("stateToTenthsC", () => {
+  test("Celsius passes through as tenths", () => {
+    expect(stateToTenthsC("21.5", "°C")).toBe(215);
+    expect(stateToTenthsC("21.5", null)).toBe(215);
+  });
+  test("Fahrenheit converts to Celsius tenths", () => {
+    expect(stateToTenthsC("71.6", "°F")).toBe(220);
+    expect(stateToTenthsC("32", "°F")).toBe(0);
+  });
+  test("non-numeric / null returns null", () => {
+    expect(stateToTenthsC("unavailable", "°C")).toBeNull();
+    expect(stateToTenthsC(null, "°C")).toBeNull();
   });
 });

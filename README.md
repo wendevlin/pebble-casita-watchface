@@ -35,9 +35,11 @@ Pebble/Rebble phone app ("Settings"). Options:
 
 - **Appearance — Light / Dark:** sets the background to white (with black clock)
   or black (with white clock). Default is **Dark**.
-- **Badges — Date / Temperature / Steps / Battery:** individually show or hide
-  the top badges (all default to **on**), and reorder them with the ▲ ▼ buttons
-  to set their left-to-right order. When more badges are enabled than fit on one
+- **Badges — Date / Temperature / Steps / Battery / Home temperature:**
+  individually show or hide the top badges (all default to **on**), and reorder
+  them with the ▲ ▼ buttons to set their left-to-right order. The **Home
+  temperature** badge only appears once Home Assistant is connected and a sensor
+  is chosen (see below). When more badges are enabled than fit on one
   line they wrap onto a second right-aligned line that sits in the empty space
   beside Casita's roof, so Casita keeps its full size.
 - **Clock — Show seconds when the light is on:** when enabled (default **off**),
@@ -90,7 +92,10 @@ Home Assistant page, now **Connected**, showing the number of available
 temperature sensors and a searchable **entity picker** to choose the home
 temperature sensor (each sensor's friendly name and area, like the Home
 Assistant frontend picker), plus a **Disconnect** button. Pick a sensor, go
-**back** to Settings, and tap **Save**.
+back, and Save. When a sensor is selected the page collapses to show just that
+sensor (name, area and its **current value**) with a **Remove sensor** button,
+and a **Home temperature** badge becomes available in the main badge list —
+reorderable and toggleable like the others.
 
 **The Home Assistant page has no Save button of its own** — connect/disconnect
 and the chosen sensor are only applied when you tap the main **Settings → Save**,
@@ -103,7 +108,7 @@ that draft **persists across reopens** (the login isn't thrown away just because
 the page reopened) until you either **Save** it or
 **Disconnect** and Save.
 
-How it works (all phone-side; wiring the actual badge is a later step):
+How it works (all phone-side):
 
 - Home Assistant uses IndieAuth-style OAuth2: the `client_id` must be a public
   `https` page whose host matches the `redirect_uri`. A tiny static page hosted
@@ -127,11 +132,20 @@ How it works (all phone-side; wiring the actual badge is a later step):
   sent to pkjs as a `haConnected` boolean in the Save payload; pkjs commits or
   clears the connection accordingly. A completed login is kept as a connected
   draft (tokens persisted) until it is saved or explicitly disconnected.
-- The OAuth URL building, state encoding, token bodies, the sensor template, and
-  sensor-list parsing/search are pure functions in `src/pkjs/ha.ts` (unit-tested
-  in `tests/ha.test.ts`). The config webview re-implements the tiny
-  base64url/state and search bits inline because it runs in its own sandbox and
-  cannot import that module.
+- The OAuth URL building, state encoding, token bodies, the sensor template,
+  sensor-list parsing/search, and the WebSocket message/parse helpers are pure
+  functions in `src/pkjs/ha.ts` (unit-tested in `tests/ha.test.ts`). The config
+  webview re-implements the tiny base64url/state and search bits inline because
+  it runs in its own sandbox and cannot import that module.
+- **Live home temperature:** once connected with a sensor selected, pkjs keeps a
+  live feed of that sensor. It opens a WebSocket to `<ha-url>/api/websocket`,
+  authenticates with the access token, and `subscribe_entities` to the chosen
+  entity so each new reading is pushed to the watch as `HA_TEMP` (tenths of a
+  degree Celsius, converted from °F when the sensor reports Fahrenheit). If the
+  runtime has no `WebSocket`, it falls back to polling `<ha-url>/api/states/<id>`
+  every 60 s. The feed is (re)started on launch and whenever the committed
+  connection/sensor changes, and stopped on disconnect. Expired tokens are
+  refreshed and the socket reconnects automatically.
 
 ## Badges
 
@@ -150,6 +164,7 @@ battery). Each is a rounded pill with an
 | Temperature | `thermometer`    | Fetched by the phone (Open-Meteo)   | One decimal, no unit letter, e.g. `24,8°`     |
 | Steps       | `shoe-print`     | Pebble Health on the watch          | `56` (<100), `0,4K` (100–999), `12K` (≥1000)  |
 | Battery     | `battery`        | The watch battery (native FFI)      | Whole percent, e.g. `85%`; icon coloured by level |
+| Home temp   | `home-thermometer` | A Home Assistant sensor (phone)   | One decimal, no unit letter, e.g. `21,3°` (deep-orange) |
 
 - **Weather** is fetched by `src/pkjs/index.ts` using the phone's location and
   the keyless [Open-Meteo](https://open-meteo.com/) API (on launch, every 30
@@ -170,6 +185,14 @@ battery). Each is a rounded pill with an
   `battery.svg`).
 - **Date** shows the current day of month, read from the watch clock and
   refreshed every minute.
+- **Home temperature** shows a Home Assistant sensor's reading, streamed live to
+  the watch by the phone over the Home Assistant WebSocket API (see the Home
+  Assistant section above) and sent in tenths of a degree Celsius via the
+  `HA_TEMP` key. Like the weather badge it is displayed in °C/°F per the watch's
+  own units setting, but its icon and value are tinted a distinct **deep-orange**
+  so it reads apart from the blue Open-Meteo temperature. The badge only appears
+  when Home Assistant is connected, a sensor is chosen, and a reading has been
+  received.
 
 The MDI icons are converted to PDC by the `resources` script (see below); the
 sources live in `mdi-svgs/` with an accent fill baked in.

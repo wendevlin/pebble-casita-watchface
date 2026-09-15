@@ -22,6 +22,7 @@ export enum Icon {
   BatteryLow = 9,
   BatteryMedium = 10,
   BatteryHigh = 11,
+  HomeThermometer = 12,
 }
 
 /**
@@ -159,14 +160,14 @@ export function batteryIcon(percent: number): Icon {
 // --------------------------------------------------------------------------- //
 
 /** Stable identifiers for the badges, in their default left→right order. */
-export type BadgeId = "date" | "weather" | "steps" | "battery";
+export type BadgeId = "date" | "weather" | "steps" | "battery" | "home";
 
-export const DEFAULT_BADGE_ORDER: BadgeId[] = ["date", "weather", "steps", "battery"];
+export const DEFAULT_BADGE_ORDER: BadgeId[] = ["date", "weather", "steps", "battery", "home"];
 
 // Single-character codes used to transmit/persist the order compactly (the
 // AppMessage + localStorage value is just their concatenation, e.g. "dwsb").
-const BADGE_CODE: Record<BadgeId, string> = { date: "d", weather: "w", steps: "s", battery: "b" };
-const BADGE_BY_CODE: Record<string, BadgeId> = { d: "date", w: "weather", s: "steps", b: "battery" };
+const BADGE_CODE: Record<BadgeId, string> = { date: "d", weather: "w", steps: "s", battery: "b", home: "h" };
+const BADGE_BY_CODE: Record<string, BadgeId> = { d: "date", w: "weather", s: "steps", b: "battery", h: "home" };
 
 /** Encodes an order as its compact code string, e.g. ["steps","date"] -> "sd". */
 export function badgeOrderToCode(order: BadgeId[]): string {
@@ -196,7 +197,7 @@ export function normalizeBadgeOrder(value: unknown): BadgeId[] {
   for (const raw of tokens) {
     const token = raw.trim();
     const id = BADGE_BY_CODE[token] ?? (token as BadgeId);
-    if ((id === "date" || id === "weather" || id === "steps" || id === "battery") && !seen[id]) {
+    if ((id === "date" || id === "weather" || id === "steps" || id === "battery" || id === "home") && !seen[id]) {
       seen[id] = true;
       order.push(id);
     }
