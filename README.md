@@ -84,22 +84,21 @@ Setup, in the phone **Settings** page:
 - **Recommended:** create a dedicated Home Assistant user for the watch with
   limited permissions instead of using your admin account.
 
-After you log in, the settings **reopen straight back into the Home Assistant
-page** (they don't stay closed). It shows **Connected**, the number of available
-temperature sensors, a searchable **entity picker** to choose the home
-temperature sensor — showing each sensor's friendly name and area, like the
-Home Assistant frontend picker — and a **Disconnect** button. Pick a sensor and
-tap **Save**.
+After you log in, the settings try to **reopen straight back into the Home
+Assistant page**. It shows **Connected**, the number of available temperature
+sensors, a searchable **entity picker** to choose the home temperature sensor —
+showing each sensor's friendly name and area, like the Home Assistant frontend
+picker — and a **Disconnect** button. Pick a sensor and tap **Save**.
 
 **Connecting and disconnecting are only applied on Save**, exactly like every
 other setting. Tapping **Disconnect** immediately flips the page to the
 disconnected (connect) view — with a "will disconnect when you save" note and a
 **Keep connected** undo — but nothing is actually cleared until you tap the main
-**Save**. Likewise a fresh login is a *draft*: the connected page shows a
-"Not saved yet — tap Save to apply" hint, and if you close settings without
-saving, the login is discarded on the next open. (The login step itself still
-has to navigate to Home Assistant's own OAuth screen, which is why it returns you
-to the connected page to pick a sensor and save.)
+**Save**. A fresh login is likewise a *draft*: the connected page shows a
+"Not saved yet — tap Save to apply" hint. Because the OAuth login has to close
+the settings to run, that draft **persists across reopens** (the login isn't
+thrown away just because the page reopened) until you either **Save** it or
+**Disconnect** and Save.
 
 How it works (all phone-side; wiring the actual badge is a later step):
 
@@ -123,8 +122,8 @@ How it works (all phone-side; wiring the actual badge is a later step):
   **not** close settings. Only **Save** and the **login** redirect navigate to
   `pebblejs://close#…`. Connect/disconnect are staged as an in-page draft and
   sent to pkjs as a `haConnected` boolean in the Save payload; pkjs commits or
-  clears the connection accordingly, and discards any unsaved login on the next
-  open.
+  clears the connection accordingly. A completed login is kept as a connected
+  draft (tokens persisted) until it is saved or explicitly disconnected.
 - The OAuth URL building, state encoding, token bodies, the sensor template, and
   sensor-list parsing/search are pure functions in `src/pkjs/ha.ts` (unit-tested
   in `tests/ha.test.ts`). The config webview re-implements the tiny

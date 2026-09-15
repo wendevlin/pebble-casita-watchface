@@ -108,11 +108,16 @@ function boolPref(key: string, fallback: boolean): boolean {
 // --- Home Assistant connection state (persisted in pkjs localStorage) ------
 //
 // Two layers: the *committed* connection (`haConnected` + tokens/sensors/
-// selection) is the saved state; `haDraftConnected` is the connection state the
-// config page is currently showing. The draft only becomes committed when the
-// user taps Save. This makes both connect and disconnect behave like the rest
-// of the settings — staged in the page, applied on Save. An unsaved login (draft
-// connected but not committed) is discarded on the next config open.
+// selection) is the saved state that the watch acts on; `haDraftConnected`
+// (set after a login) marks a connection the config page shows as connected but
+// that hasn't been saved yet. The draft only becomes committed when the user
+// taps Save. This makes connect and disconnect behave like the rest of the
+// settings — staged in the page, applied on Save.
+//
+// A completed login persists as a connected *draft* across reopens (with a
+// "not saved yet" hint) until the user either Saves it (commit) or Disconnects
+// and Saves (clear) — the OAuth login has to close the page to run, so we can't
+// throw the login away just because the page reopened.
 
 function cachedSensorList(): HaSensor[] {
   const raw = localStorage.getItem("haSensorsJson");
@@ -130,9 +135,10 @@ function committedConnected(): boolean {
 }
 
 function draftConnected(): boolean {
-  const d = localStorage.getItem("haDraftConnected");
-  if (d === "1") return true;
-  if (d === "0") return false;
+  // A draft connection only counts while we still hold a token to back it.
+  if (localStorage.getItem("haDraftConnected") === "1") {
+    return !!localStorage.getItem("haAccessToken");
+  }
   return committedConnected();
 }
 
@@ -344,7 +350,9 @@ function fetchSensors(
 
 /** Fetch sensors with a valid token (refreshing first if needed) and cache them. */
 function refreshSensorCache(cb?: (list: HaSensor[]) => void): void {
-  if (localStorage.getItem("haConnected") !== "1") {
+  // Works for both committed connections and unsaved (draft) logins — we just
+  // need a token. Nothing to do if we're not connected in either sense.
+  if (!draftConnected()) {
     if (cb) cb([]);
     return;
   }
@@ -462,13 +470,11 @@ function handleHaCode(code: string, state: string): void {
 }
 
 Pebble.addEventListener("showConfiguration", function () {
-  // Discard any unsaved login: if a previous session logged in but closed the
-  // page without tapping Save, the connection was never committed — drop the
-  // orphaned tokens so we open in a clean, truly-disconnected state.
-  if (!committedConnected()) {
-    clearHaConnection();
-  } else {
-    // Start the page's draft in sync with the committed (saved) connection.
+  // Keep the page's draft connection in sync with the committed state. An
+  // unsaved login (haDraftConnected set, but not yet committed) is preserved so
+  // the user can reopen settings and still reach Save — the OAuth login closed
+  // the page to run, so reopening must not throw the login away.
+  if (committedConnected()) {
     localStorage.setItem("haDraftConnected", "1");
   }
   openConfig("main");
