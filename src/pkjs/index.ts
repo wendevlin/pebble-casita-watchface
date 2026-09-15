@@ -459,6 +459,7 @@ Pebble.addEventListener("webviewclosed", function (e) {
     state?: string;
     error?: string;
     haSensor?: string;
+    haDisconnect?: boolean;
   } & Partial<Config>;
   try {
     parsed = JSON.parse(decodeURIComponent(e.response));
@@ -467,18 +468,14 @@ Pebble.addEventListener("webviewclosed", function (e) {
     return;
   }
 
-  // Home Assistant flows carry an explicit action; the settings Save carries none.
+  // The Home Assistant OAuth callback carries an explicit action; the settings
+  // Save (including a deferred disconnect) carries none.
   if (parsed.action === "ha_code") {
     if (parsed.error) {
       console.log("Casita: HA login error: " + parsed.error);
       return;
     }
     handleHaCode(parsed.code || "", parsed.state || "");
-    return;
-  }
-  if (parsed.action === "ha_disconnect") {
-    clearHaConnection();
-    console.log("Casita: HA disconnected");
     return;
   }
 
@@ -491,8 +488,12 @@ Pebble.addEventListener("webviewclosed", function (e) {
   localStorage.setItem("showBattery", config.battery ? "1" : "0");
   localStorage.setItem("badgeOrder", badgeOrderToCode(normalizeBadgeOrder(config.order)));
   localStorage.setItem("showSeconds", config.seconds ? "1" : "0");
-  // The selected home-temperature sensor is only meaningful while connected.
-  if (typeof parsed.haSensor === "string" && localStorage.getItem("haConnected") === "1") {
+  // A pending disconnect is only committed here, on Save. Otherwise persist the
+  // selected home-temperature sensor (only meaningful while connected).
+  if (parsed.haDisconnect) {
+    clearHaConnection();
+    console.log("Casita: HA disconnected (on save)");
+  } else if (typeof parsed.haSensor === "string" && localStorage.getItem("haConnected") === "1") {
     localStorage.setItem("haSensorEntity", parsed.haSensor);
   }
   sendSettings();

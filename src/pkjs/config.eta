@@ -9,9 +9,9 @@
  *
  * The page is a tiny two-view SPA: the main settings view and a dedicated Home
  * Assistant view. Navigation between them is client-side (show/hide), so opening
- * the HA page does NOT close settings. Only three things actually close the
+ * the HA page does NOT close settings. Only two things actually close the
  * webview (the platform's one channel back to pkjs, via pebblejs://close#):
- * Save, the HA login redirect, and Disconnect.
+ * Save (which also commits a deferred disconnect) and the HA login redirect.
  */
 %><!DOCTYPE html>
 <html>
@@ -126,17 +126,23 @@
 
         <!-- Connected: status, sensor picker, disconnect -->
         <div id="ha-connected" style="display:none">
-          <div class="ha-status ok">
+          <div class="ha-status ok" id="ha-connected-status">
             &#10003; Connected
             <div class="url" id="ha-url-shown"></div>
           </div>
-          <p class="sub" id="ha-sensors"></p>
-          <legend>Home temperature sensor</legend>
-          <input type="text" class="search" id="ha-search" placeholder="Search sensors…" autocapitalize="off" autocorrect="off" spellcheck="false">
-          <div class="picker">
-            <div class="picker-list" id="ha-picker"></div>
+          <div class="ha-status" id="ha-pending-status" style="display:none; border-left:4px solid #f44336;">
+            Will disconnect when you tap <strong>Save</strong>.
+            <div class="url">Tap “Keep connected” to undo.</div>
           </div>
-          <p class="hint">Pick the temperature sensor for the home badge, then tap Save. Names and areas come from Home Assistant.</p>
+          <div id="ha-connected-body">
+            <p class="sub" id="ha-sensors"></p>
+            <legend>Home temperature sensor</legend>
+            <input type="text" class="search" id="ha-search" placeholder="Search sensors…" autocapitalize="off" autocorrect="off" spellcheck="false">
+            <div class="picker">
+              <div class="picker-list" id="ha-picker"></div>
+            </div>
+            <p class="hint">Pick the temperature sensor for the home badge, then tap Save. Names and areas come from Home Assistant.</p>
+          </div>
           <button type="submit">Save</button>
           <button type="button" class="danger" id="ha-disconnect">Disconnect Home Assistant</button>
         </div>
@@ -338,11 +344,30 @@
           window.location.href = authorizeUrl;
         });
       }
+      // Disconnect is deferred: it does NOT close the page. Tapping it marks a
+      // pending disconnect (with a banner + undo) and hides the picker; the
+      // connection is only actually cleared when the user taps Save. This keeps
+      // the flow inside the page — symmetric with connecting, after which you
+      // land back here to search and pick a sensor before saving.
+      var pendingDisconnect = false;
       var disconnectBtn = document.getElementById('ha-disconnect');
+      function applyPendingDisconnect() {
+        var connectedStatus = document.getElementById('ha-connected-status');
+        var pendingStatus = document.getElementById('ha-pending-status');
+        var body = document.getElementById('ha-connected-body');
+        if (connectedStatus) connectedStatus.style.display = pendingDisconnect ? 'none' : 'block';
+        if (pendingStatus) pendingStatus.style.display = pendingDisconnect ? 'block' : 'none';
+        if (body) body.style.display = pendingDisconnect ? 'none' : 'block';
+        if (disconnectBtn) {
+          disconnectBtn.textContent = pendingDisconnect
+            ? 'Keep Home Assistant connected' : 'Disconnect Home Assistant';
+          disconnectBtn.className = pendingDisconnect ? 'secondary' : 'danger';
+        }
+      }
       if (disconnectBtn) {
         disconnectBtn.addEventListener('click', function () {
-          window.location.href = 'pebblejs://close#' +
-            encodeURIComponent(JSON.stringify({ action: 'ha_disconnect' }));
+          pendingDisconnect = !pendingDisconnect;
+          applyPendingDisconnect();
         });
       }
 
@@ -359,7 +384,8 @@
           battery: form.querySelector('input[name=battery]').checked,
           order: badgeItems().map(function (li) { return li.getAttribute('data-badge'); }),
           seconds: form.querySelector('input[name=seconds]').checked,
-          haSensor: selectedSensor
+          haSensor: selectedSensor,
+          haDisconnect: pendingDisconnect
         };
         location.href = 'pebblejs://close#' + encodeURIComponent(JSON.stringify(payload));
       });

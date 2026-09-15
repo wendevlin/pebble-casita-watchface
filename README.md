@@ -91,6 +91,13 @@ temperature sensor — showing each sensor's friendly name and area, like the
 Home Assistant frontend picker — and a **Disconnect** button. Pick a sensor and
 tap **Save**.
 
+**Disconnect is deferred:** tapping it doesn't leave the page — it marks a
+pending disconnect (with a banner and a "Keep connected" undo) and only actually
+disconnects when you tap **Save**, so the whole flow stays inside settings.
+(Connecting can't be deferred the same way: logging in must navigate to Home
+Assistant's own OAuth screen, but that returns you to the connected page to pick
+a sensor and save.)
+
 How it works (all phone-side; wiring the actual badge is a later step):
 
 - Home Assistant uses IndieAuth-style OAuth2: the `client_id` must be a public
