@@ -99,7 +99,10 @@ function pillWidth(badge: Badge): number {
  *
  * Badges are laid out left→right and wrap onto additional right-aligned lines
  * when they no longer fit the available width, so extra badges (e.g. battery)
- * stack into a second line rather than overflowing off-screen.
+ * stack into a second line rather than overflowing off-screen. When a wrapped
+ * line holds exactly two badges they are split to the left and right corners
+ * (rather than kept together) so Casita's central roof peak fits in the gap
+ * between them instead of being overlapped.
  *
  * Only a SINGLE line's height is reserved even when the badges wrap: Casita is a
  * little house, so its triangular roof leaves empty space in the top corners.
@@ -134,13 +137,24 @@ export function drawBadges(area: Rect, palette: Palette, now: Date): number {
 
   const font = badgeFont;
   let y = area.y + MARGIN;
-  for (const line of lines) {
-    let x = area.x + area.width - MARGIN - line.total;
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
     const iconY = y + ((PILL_H - ICON_SIZE) >> 1);
     const textY = y + ((PILL_H - font.height) >> 1) - BADGE_TEXT_NUDGE;
-    for (let i = line.start; i < line.end; i++) {
-      drawPill(x, y, widths[i], badges[i], palette, iconY, textY);
-      x += widths[i] + BADGE_GAP;
+    if (li > 0 && line.end - line.start === 2) {
+      // A wrapped (second) row with exactly two badges straddles Casita's
+      // central roof peak: pin one badge to the left corner and the other to
+      // the right corner so neither sits over the peak in the middle.
+      drawPill(area.x + MARGIN, y, widths[line.start], badges[line.start], palette, iconY, textY);
+      const rightW = widths[line.end - 1];
+      const rightX = area.x + area.width - MARGIN - rightW;
+      drawPill(rightX, y, rightW, badges[line.end - 1], palette, iconY, textY);
+    } else {
+      let x = area.x + area.width - MARGIN - line.total;
+      for (let i = line.start; i < line.end; i++) {
+        drawPill(x, y, widths[i], badges[i], palette, iconY, textY);
+        x += widths[i] + BADGE_GAP;
+      }
     }
     y += PILL_H + BADGE_GAP;
   }

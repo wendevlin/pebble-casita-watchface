@@ -40,8 +40,9 @@ Pebble/Rebble phone app ("Settings"). Options:
   them with the ▲ ▼ buttons to set their left-to-right order. The **Home
   temperature** badge only appears once Home Assistant is connected and a sensor
   is chosen (see below). When more badges are enabled than fit on one
-  line they wrap onto a second right-aligned line that sits in the empty space
-  beside Casita's roof, so Casita keeps its full size.
+  line they wrap onto a second line that sits in the empty space beside Casita's
+  roof, so Casita keeps its full size. A second row of exactly two badges is
+  split to the left and right corners so the roof peak sits clear between them.
 - **Clock — Show seconds when the light is on:** when enabled (default **off**),
   a small seconds counter appears next to the clock while the backlight is on —
   raise your wrist, double tap, or press the back button to light the screen and
@@ -153,9 +154,11 @@ Badges render right-aligned across the top of the face, wrapping onto a second
 line when they don't all fit. Only one line's worth of vertical space is
 reserved, so Casita keeps its full size: because it's a little house, its
 triangular roof leaves the top corners empty and the wrapped line sits in that
-space beside the roof peak rather than pushing Casita down. Their left-to-right
-order is configurable from the settings page (default: date, temperature, steps,
-battery). Each is a rounded pill with an
+space beside the roof peak rather than pushing Casita down. When the wrapped
+line holds exactly two badges they are split to the left and right corners so
+Casita's central roof peak fits in the gap between them instead of being
+overlapped. Their left-to-right order is configurable from the settings page
+(default: date, temperature, steps, battery). Each is a rounded pill with an
 [MDI](https://pictogrammers.com/library/mdi/) icon and a value:
 
 | Badge       | Icon (MDI)       | Source                              | Format                                        |
