@@ -20,11 +20,15 @@ import { CONFIG_HTML } from "./config-html";
 import {
   HA_CLIENT_ID,
   HA_REDIRECT_URI,
+  HA_SENSOR_TEMPLATE,
   decodeState,
   tokenExchangeBody,
   tokenRefreshBody,
-  countTemperatureSensors,
+  templateRequestBody,
+  parseSensorList,
+  sensorsFromStates,
   normalizeHaUrl,
+  type HaSensor,
 } from "./ha";
 
 const WEATHER_REFRESH_MS = 30 * 60 * 1000;
@@ -33,6 +37,8 @@ interface HaConfig {
   connected: boolean;
   url: string;
   sensors: number;
+  selected: string;
+  list: HaSensor[];
   clientId: string;
   redirectUri: string;
 }
@@ -46,6 +52,7 @@ interface Config {
   order: string[];
   seconds: boolean;
   ha: HaConfig;
+  view: string;
 }
 
 // Badge order (mirrors src/embeddedjs/logic.ts): the order is persisted/sent as
@@ -99,13 +106,27 @@ function boolPref(key: string, fallback: boolean): boolean {
 
 // --- Home Assistant connection state (persisted in pkjs localStorage) ------
 
+function cachedSensorList(): HaSensor[] {
+  const raw = localStorage.getItem("haSensorsJson");
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (err) {
+    return [];
+  }
+}
+
 function haStatus(): HaConfig {
   const connected = localStorage.getItem("haConnected") === "1";
-  const sensors = parseInt(localStorage.getItem("haSensorCount") || "0", 10);
+  const list = cachedSensorList();
+  const storedCount = parseInt(localStorage.getItem("haSensorCount") || "", 10);
   return {
     connected: connected,
     url: localStorage.getItem("haUrl") || "",
-    sensors: isNaN(sensors) ? 0 : sensors,
+    sensors: isNaN(storedCount) ? list.length : storedCount,
+    selected: localStorage.getItem("haSensorEntity") || "",
+    list: list,
     clientId: HA_CLIENT_ID,
     redirectUri: HA_REDIRECT_URI,
   };
@@ -118,12 +139,17 @@ function clearHaConnection(): void {
   localStorage.removeItem("haRefreshToken");
   localStorage.removeItem("haExpiresAt");
   localStorage.removeItem("haSensorCount");
+  localStorage.removeItem("haSensorsJson");
+  localStorage.removeItem("haSensorEntity");
 }
 
 /**
  * Builds the settings page URL. The static markup comes from the build-time
  * rendered template; the current preferences are injected by replacing the
  * `__CONFIG__` token with a JSON blob the page's inline script applies.
+ *
+ * `initialView` selects which of the config page's two views opens first
+ * ("main" or "ha"); after an OAuth connect we reopen straight into "ha".
  */
 function configPage(
   theme: string,
@@ -133,6 +159,7 @@ function configPage(
   showBattery: boolean,
   order: string[],
   showSeconds: boolean,
+  initialView: string,
 ): string {
   const config: Config = {
     theme: theme === "light" ? "light" : "dark",
@@ -143,9 +170,25 @@ function configPage(
     order: order,
     seconds: showSeconds,
     ha: haStatus(),
+    view: initialView === "ha" ? "ha" : "main",
   };
   const html = CONFIG_HTML.replace("__CONFIG__", JSON.stringify(config));
   return "data:text/html," + encodeURIComponent(html);
+}
+
+function openConfig(initialView: string): void {
+  Pebble.openURL(
+    configPage(
+      currentTheme(),
+      boolPref("showWeather", true),
+      boolPref("showSteps", true),
+      boolPref("showDate", true),
+      boolPref("showBattery", true),
+      currentBadgeOrder(),
+      boolPref("showSeconds", false),
+      initialView,
+    )
+  );
 }
 
 function sendSettings(): void {
@@ -223,32 +266,86 @@ Pebble.addEventListener("ready", function () {
 // --- Home Assistant OAuth (phone-side) -------------------------------------
 // The config webview navigates to HA's own login screen; HA redirects through
 // our hosted callback page, which hands the auth code back here via the
-// webviewclosed handler. We exchange it for tokens, then count how many
-// temperature sensors the instance exposes so the settings page can prove the
-// connection works.
+// webviewclosed handler. We exchange it for tokens, then fetch the available
+// temperature sensors (with their friendly name and area, like the HA frontend
+// entity picker) so the settings page can prove the connection works and let
+// the user pick one for the home temperature badge.
 
-function fetchTemperatureSensors(
+/**
+ * Fetch temperature sensors with name + area. Tries POST /api/template (which
+ * can resolve areas via `area_name()`); if that fails, falls back to
+ * GET /api/states (name only, no area). Calls back with the sensor list.
+ */
+function fetchSensors(
   haUrl: string,
   accessToken: string,
-  cb: (count: number | null) => void,
+  cb: (list: HaSensor[]) => void,
 ): void {
+  const fallback = function () {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", haUrl + "/api/states", true);
+    xhr.setRequestHeader("Authorization", "Bearer " + accessToken);
+    xhr.onload = function () {
+      try {
+        cb(sensorsFromStates(JSON.parse(xhr.responseText)));
+      } catch (err) {
+        console.log("Casita: HA states parse error: " + err);
+        cb([]);
+      }
+    };
+    xhr.onerror = function () {
+      console.log("Casita: HA states request failed");
+      cb([]);
+    };
+    xhr.send();
+  };
+
   const xhr = new XMLHttpRequest();
-  xhr.open("GET", haUrl + "/api/states", true);
+  xhr.open("POST", haUrl + "/api/template", true);
   xhr.setRequestHeader("Authorization", "Bearer " + accessToken);
+  xhr.setRequestHeader("Content-Type", "application/json");
   xhr.onload = function () {
-    try {
-      const states = JSON.parse(xhr.responseText);
-      cb(countTemperatureSensors(states));
-    } catch (err) {
-      console.log("Casita: HA states parse error: " + err);
-      cb(null);
+    if (xhr.status < 200 || xhr.status >= 300) {
+      console.log("Casita: HA template failed (" + xhr.status + "), falling back to /api/states");
+      fallback();
+      return;
     }
+    const list = parseSensorList(xhr.responseText);
+    cb(list);
   };
   xhr.onerror = function () {
-    console.log("Casita: HA states request failed");
-    cb(null);
+    console.log("Casita: HA template request failed, falling back to /api/states");
+    fallback();
   };
-  xhr.send();
+  xhr.send(templateRequestBody(HA_SENSOR_TEMPLATE));
+}
+
+/** Fetch sensors with a valid token (refreshing first if needed) and cache them. */
+function refreshSensorCache(cb?: (list: HaSensor[]) => void): void {
+  if (localStorage.getItem("haConnected") !== "1") {
+    if (cb) cb([]);
+    return;
+  }
+  const haUrl = localStorage.getItem("haUrl") || "";
+  const withToken = function (token: string | null) {
+    if (!haUrl || !token) {
+      if (cb) cb([]);
+      return;
+    }
+    fetchSensors(haUrl, token, function (list) {
+      localStorage.setItem("haSensorsJson", JSON.stringify(list));
+      localStorage.setItem("haSensorCount", String(list.length));
+      if (cb) cb(list);
+    });
+  };
+  const expiresAt = parseInt(localStorage.getItem("haExpiresAt") || "0", 10);
+  if (!isNaN(expiresAt) && expiresAt - Date.now() < 60000 && localStorage.getItem("haRefreshToken")) {
+    refreshHaToken(function (token) {
+      withToken(token || localStorage.getItem("haAccessToken"));
+    });
+  } else {
+    withToken(localStorage.getItem("haAccessToken"));
+  }
 }
 
 function refreshHaToken(cb: (accessToken: string | null) => void): void {
@@ -322,9 +419,14 @@ function handleHaCode(code: string, state: string): void {
     if (token.refresh_token) localStorage.setItem("haRefreshToken", token.refresh_token);
     localStorage.setItem("haExpiresAt", String(expiresAt));
     localStorage.setItem("haConnected", "1");
-    fetchTemperatureSensors(haUrl, token.access_token, function (count) {
-      localStorage.setItem("haSensorCount", String(count == null ? 0 : count));
-      console.log("Casita: HA connected, " + (count == null ? "unknown" : count) + " temp sensors");
+    // Fetch the sensor list, cache it, then reopen the config straight into the
+    // Home Assistant view so the user lands back in settings (now connected and
+    // ready to pick a sensor) instead of being left with a closed page.
+    fetchSensors(haUrl, token.access_token, function (list) {
+      localStorage.setItem("haSensorsJson", JSON.stringify(list));
+      localStorage.setItem("haSensorCount", String(list.length));
+      console.log("Casita: HA connected, " + list.length + " temp sensors");
+      openConfig("ha");
     });
   };
   xhr.onerror = function () {
@@ -334,17 +436,10 @@ function handleHaCode(code: string, state: string): void {
 }
 
 Pebble.addEventListener("showConfiguration", function () {
-  Pebble.openURL(
-    configPage(
-      currentTheme(),
-      boolPref("showWeather", true),
-      boolPref("showSteps", true),
-      boolPref("showDate", true),
-      boolPref("showBattery", true),
-      currentBadgeOrder(),
-      boolPref("showSeconds", false)
-    )
-  );
+  openConfig("main");
+  // Refresh the cached sensor list in the background so the next time the HA
+  // view opens (or the user picks a sensor) the names/areas are up to date.
+  refreshSensorCache();
 });
 
 // The settings live in TWO isolated JS sandboxes that cannot see each other:
@@ -358,7 +453,13 @@ Pebble.addEventListener("webviewclosed", function (e) {
   if (!e || !e.response) {
     return;
   }
-  let parsed: { action?: string; code?: string; state?: string; error?: string } & Partial<Config>;
+  let parsed: {
+    action?: string;
+    code?: string;
+    state?: string;
+    error?: string;
+    haSensor?: string;
+  } & Partial<Config>;
   try {
     parsed = JSON.parse(decodeURIComponent(e.response));
   } catch (err) {
@@ -390,6 +491,10 @@ Pebble.addEventListener("webviewclosed", function (e) {
   localStorage.setItem("showBattery", config.battery ? "1" : "0");
   localStorage.setItem("badgeOrder", badgeOrderToCode(normalizeBadgeOrder(config.order)));
   localStorage.setItem("showSeconds", config.seconds ? "1" : "0");
+  // The selected home-temperature sensor is only meaningful while connected.
+  if (typeof parsed.haSensor === "string" && localStorage.getItem("haConnected") === "1") {
+    localStorage.setItem("haSensorEntity", parsed.haSensor);
+  }
   sendSettings();
   fetchWeather();
 });

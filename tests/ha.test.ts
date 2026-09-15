@@ -9,6 +9,11 @@ import {
   tokenExchangeBody,
   tokenRefreshBody,
   countTemperatureSensors,
+  templateRequestBody,
+  parseSensorList,
+  sensorsFromStates,
+  matchesSensorQuery,
+  HA_SENSOR_TEMPLATE,
   HA_CLIENT_ID,
   HA_REDIRECT_URI,
 } from "../src/pkjs/ha";
@@ -99,5 +104,77 @@ describe("countTemperatureSensors", () => {
   test("handles empty / missing input", () => {
     expect(countTemperatureSensors([])).toBe(0);
     expect(countTemperatureSensors(undefined as unknown as [])).toBe(0);
+  });
+});
+
+describe("templateRequestBody", () => {
+  test("wraps the template in a JSON body", () => {
+    const body = templateRequestBody(HA_SENSOR_TEMPLATE);
+    const parsed = JSON.parse(body);
+    expect(parsed.template).toBe(HA_SENSOR_TEMPLATE);
+  });
+  test("template targets temperature sensors with name and area", () => {
+    expect(HA_SENSOR_TEMPLATE).toContain("device_class == 'temperature'");
+    expect(HA_SENSOR_TEMPLATE).toContain("area_name(s.entity_id)");
+    expect(HA_SENSOR_TEMPLATE).toContain("tojson");
+  });
+});
+
+describe("parseSensorList", () => {
+  test("parses a well-formed template response", () => {
+    const text = JSON.stringify([
+      { entity_id: "sensor.living", name: "Living Room", area: "Living Room" },
+      { entity_id: "sensor.out", name: "Outside", area: null },
+    ]);
+    const list = parseSensorList(text);
+    expect(list.length).toBe(2);
+    expect(list[0]).toEqual({ entity_id: "sensor.living", name: "Living Room", area: "Living Room" });
+    // null area becomes "" and missing name would fall back to entity_id
+    expect(list[1]).toEqual({ entity_id: "sensor.out", name: "Outside", area: "" });
+  });
+  test("drops entries without an entity_id and falls back name->id", () => {
+    const text = JSON.stringify([
+      { name: "no id" },
+      { entity_id: "sensor.x" },
+    ]);
+    const list = parseSensorList(text);
+    expect(list.length).toBe(1);
+    expect(list[0]).toEqual({ entity_id: "sensor.x", name: "sensor.x", area: "" });
+  });
+  test("returns [] for junk / non-array", () => {
+    expect(parseSensorList("not json")).toEqual([]);
+    expect(parseSensorList("{}")).toEqual([]);
+    expect(parseSensorList("")).toEqual([]);
+  });
+});
+
+describe("sensorsFromStates (fallback)", () => {
+  test("builds sensors from /api/states with blank area", () => {
+    const states = [
+      { entity_id: "sensor.a", attributes: { device_class: "temperature", friendly_name: "A" } },
+      { entity_id: "sensor.b", attributes: { device_class: "temperature" } },
+      { entity_id: "sensor.h", attributes: { device_class: "humidity" } },
+    ];
+    const list = sensorsFromStates(states);
+    expect(list).toEqual([
+      { entity_id: "sensor.a", name: "A", area: "" },
+      { entity_id: "sensor.b", name: "sensor.b", area: "" },
+    ]);
+  });
+});
+
+describe("matchesSensorQuery", () => {
+  const s = { entity_id: "sensor.living_temp", name: "Living Room", area: "Ground Floor" };
+  test("empty query matches", () => {
+    expect(matchesSensorQuery(s, "")).toBe(true);
+    expect(matchesSensorQuery(s, "   ")).toBe(true);
+  });
+  test("matches on name, area, or entity id, case-insensitive", () => {
+    expect(matchesSensorQuery(s, "living")).toBe(true);
+    expect(matchesSensorQuery(s, "GROUND")).toBe(true);
+    expect(matchesSensorQuery(s, "sensor.living")).toBe(true);
+  });
+  test("no match returns false", () => {
+    expect(matchesSensorQuery(s, "kitchen")).toBe(false);
   });
 });

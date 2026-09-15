@@ -154,7 +154,7 @@ export function tokenRefreshBody(refreshToken: string, clientId: string): string
 
 export interface HaEntity {
   entity_id?: string;
-  attributes?: { device_class?: string; unit_of_measurement?: string };
+  attributes?: { device_class?: string; unit_of_measurement?: string; friendly_name?: string };
 }
 
 /**
@@ -171,4 +171,90 @@ export function countTemperatureSensors(states: HaEntity[]): number {
     }
   }
   return count;
+}
+
+// --- Temperature sensor listing (name + area, like the HA entity picker) ---
+
+export interface HaSensor {
+  entity_id: string;
+  name: string;
+  area: string;
+}
+
+/**
+ * Jinja template rendered by POST /api/template to list every temperature
+ * sensor with the same friendly name and area the Home Assistant frontend
+ * entity picker shows. `area_name()` resolves the entity's area (directly or via
+ * its device); `tojson` guarantees valid JSON output. The `{%-`/`-%}` trim
+ * markers keep the rendered result down to just the JSON array.
+ */
+export const HA_SENSOR_TEMPLATE =
+  "{%- set ns = namespace(items=[]) -%}" +
+  "{%- for s in states if s.attributes.device_class == 'temperature' -%}" +
+  "{%- set ns.items = ns.items + [{'entity_id': s.entity_id, 'name': s.name, 'area': area_name(s.entity_id)}] -%}" +
+  "{%- endfor -%}" +
+  "{{ ns.items | tojson }}";
+
+/** JSON request body for POST /api/template. */
+export function templateRequestBody(template: string): string {
+  return JSON.stringify({ template: template });
+}
+
+function toSensor(raw: unknown): HaSensor | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as { entity_id?: unknown; name?: unknown; area?: unknown };
+  const entityId = o.entity_id == null ? "" : String(o.entity_id);
+  if (!entityId) return null;
+  const name = o.name == null || o.name === "" ? entityId : String(o.name);
+  const area = o.area == null ? "" : String(o.area);
+  return { entity_id: entityId, name: name, area: area };
+}
+
+/** Parse the JSON array returned by the sensor template into typed sensors. */
+export function parseSensorList(text: string): HaSensor[] {
+  let arr: unknown;
+  try {
+    arr = JSON.parse(text);
+  } catch (err) {
+    return [];
+  }
+  if (!arr || Object.prototype.toString.call(arr) !== "[object Array]") return [];
+  const out: HaSensor[] = [];
+  for (let i = 0; i < (arr as unknown[]).length; i++) {
+    const s = toSensor((arr as unknown[])[i]);
+    if (s) out.push(s);
+  }
+  return out;
+}
+
+/**
+ * Fallback when /api/template is unavailable: build the sensor list from
+ * GET /api/states. Area is unknown here (the states API doesn't expose it), so
+ * it is left blank.
+ */
+export function sensorsFromStates(states: HaEntity[]): HaSensor[] {
+  if (!states || !states.length) return [];
+  const out: HaSensor[] = [];
+  for (let i = 0; i < states.length; i++) {
+    const e = states[i];
+    if (e && e.attributes && e.attributes.device_class === "temperature" && e.entity_id) {
+      out.push({
+        entity_id: e.entity_id,
+        name: e.attributes.friendly_name || e.entity_id,
+        area: "",
+      });
+    }
+  }
+  return out;
+}
+
+/** Case-insensitive match of a sensor against a search query (name/area/id). */
+export function matchesSensorQuery(sensor: HaSensor, query: string): boolean {
+  const q = (query || "").trim().toLowerCase();
+  if (q === "") return true;
+  return (
+    sensor.name.toLowerCase().indexOf(q) >= 0 ||
+    sensor.area.toLowerCase().indexOf(q) >= 0 ||
+    sensor.entity_id.toLowerCase().indexOf(q) >= 0
+  );
 }

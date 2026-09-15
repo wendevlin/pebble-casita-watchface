@@ -68,26 +68,30 @@ How it works:
 
 ## Home Assistant connection
 
-The settings page can connect to your Home Assistant instance so the watch can
-later show a second, home temperature badge. This first step establishes the
-login and proves it works by reporting the connection status and how many
-temperature sensors your instance exposes; wiring the actual badge comes later.
+The settings page can connect to your Home Assistant instance to add a second,
+home temperature badge. Home Assistant has its own **dedicated page** inside
+settings, reached from a distinct **Connect / Manage Home Assistant** button
+(with a status dot) — separate from the main **Save** button.
 
 Setup, in the phone **Settings** page:
 
-- Tap **Connect Home Assistant**, enter your Home Assistant URL, and tap **Log
-  in to Home Assistant**. Home Assistant's own login screen opens — you never
-  create or paste a token by hand.
+- Tap **Connect Home Assistant** to open the Home Assistant page, enter your
+  Home Assistant URL, and tap **Log in to Home Assistant**. Home Assistant's own
+  login screen opens — you never create or paste a token by hand.
 - **Use a remote URL** (e.g. your [Nabu Casa](https://www.nabucasa.com/) address
   or a reverse-proxied `https://` URL) so the watch works everywhere, not just on
   your home Wi‑Fi.
 - **Recommended:** create a dedicated Home Assistant user for the watch with
   limited permissions instead of using your admin account.
 
-After you log in, reopen **Settings** to see **Connected** and the number of
-available temperature sensors, plus a **Disconnect** button.
+After you log in, the settings **reopen straight back into the Home Assistant
+page** (they don't stay closed). It shows **Connected**, the number of available
+temperature sensors, a searchable **entity picker** to choose the home
+temperature sensor — showing each sensor's friendly name and area, like the
+Home Assistant frontend picker — and a **Disconnect** button. Pick a sensor and
+tap **Save**.
 
-How it works (all phone-side, no watch message keys yet):
+How it works (all phone-side; wiring the actual badge is a later step):
 
 - Home Assistant uses IndieAuth-style OAuth2: the `client_id` must be a public
   `https` page whose host matches the `redirect_uri`. A tiny static page hosted
@@ -98,12 +102,21 @@ How it works (all phone-side, no watch message keys yet):
 - The config webview navigates to `<ha-url>/auth/authorize?…`; after login,
   `callback.html` returns the code to pkjs. pkjs (`src/pkjs/index.ts`) exchanges
   it at `<ha-url>/auth/token` for access/refresh tokens (persisted in
-  `localStorage`), then `GET <ha-url>/api/states` and counts entities whose
-  `attributes.device_class === "temperature"`.
-- The OAuth URL building, state encoding, token bodies and sensor counting are
-  pure functions in `src/pkjs/ha.ts` (unit-tested in `tests/ha.test.ts`). The
-  config webview re-implements the tiny base64url/state bits inline because it
-  runs in its own sandbox and cannot import that module.
+  `localStorage`), then fetches the temperature sensors via
+  `POST <ha-url>/api/template` (a Jinja template that resolves each sensor's
+  friendly name and area via `area_name()`), falling back to
+  `GET <ha-url>/api/states` (name only) if templating is unavailable. The sensor
+  list is cached in `localStorage` so the settings page can render the picker
+  immediately, and refreshed in the background on open.
+- The config page is a small two-view SPA (main settings + the Home Assistant
+  page); switching views is client-side, so opening the Home Assistant page does
+  **not** close settings. Only **Save**, the **login** redirect, and
+  **Disconnect** navigate to `pebblejs://close#…`.
+- The OAuth URL building, state encoding, token bodies, the sensor template, and
+  sensor-list parsing/search are pure functions in `src/pkjs/ha.ts` (unit-tested
+  in `tests/ha.test.ts`). The config webview re-implements the tiny
+  base64url/state and search bits inline because it runs in its own sandbox and
+  cannot import that module.
 
 ## Badges
 
