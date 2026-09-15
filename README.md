@@ -84,20 +84,23 @@ Setup, in the phone **Settings** page:
 - **Recommended:** create a dedicated Home Assistant user for the watch with
   limited permissions instead of using your admin account.
 
-After you log in, the settings try to **reopen straight back into the Home
-Assistant page**. It shows **Connected**, the number of available temperature
-sensors, a searchable **entity picker** to choose the home temperature sensor —
-showing each sensor's friendly name and area, like the Home Assistant frontend
-picker — and a **Disconnect** button. Pick a sensor and tap **Save**.
+After you log in, Home Assistant's OAuth screen forces **Settings to close**.
+**Reopen Settings** from the Pebble app — it drops you straight back into the
+Home Assistant page, now **Connected**, showing the number of available
+temperature sensors and a searchable **entity picker** to choose the home
+temperature sensor (each sensor's friendly name and area, like the Home
+Assistant frontend picker), plus a **Disconnect** button. Pick a sensor, go
+**back** to Settings, and tap **Save**.
 
-**Connecting and disconnecting are only applied on Save**, exactly like every
-other setting. Tapping **Disconnect** immediately flips the page to the
-disconnected (connect) view — with a "will disconnect when you save" note and a
-**Keep connected** undo — but nothing is actually cleared until you tap the main
-**Save**. A fresh login is likewise a *draft*: the connected page shows a
-"Not saved yet — tap Save to apply" hint. Because the OAuth login has to close
-the settings to run, that draft **persists across reopens** (the login isn't
-thrown away just because the page reopened) until you either **Save** it or
+**The Home Assistant page has no Save button of its own** — connect/disconnect
+and the chosen sensor are only applied when you tap the main **Settings → Save**,
+exactly like every other setting. Tapping **Disconnect** immediately flips the
+page to the disconnected (connect) view — with a "will disconnect when you save"
+note and a **Keep connected** undo — but nothing is actually cleared until you
+save Settings. A fresh login is likewise a *draft*: the connected page shows a
+"Not saved yet" hint. Because the OAuth login has to close the settings to run,
+that draft **persists across reopens** (the login isn't thrown away just because
+the page reopened) until you either **Save** it or
 **Disconnect** and Save.
 
 How it works (all phone-side; wiring the actual badge is a later step):

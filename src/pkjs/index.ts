@@ -474,10 +474,14 @@ Pebble.addEventListener("showConfiguration", function () {
   // unsaved login (haDraftConnected set, but not yet committed) is preserved so
   // the user can reopen settings and still reach Save — the OAuth login closed
   // the page to run, so reopening must not throw the login away.
+  const unsavedLogin = draftConnected() && !committedConnected();
   if (committedConnected()) {
     localStorage.setItem("haDraftConnected", "1");
   }
-  openConfig("main");
+  // After a login the OAuth flow forced Settings to close; when the user reopens
+  // we drop them straight into the Home Assistant view to finish picking a
+  // sensor, since the automatic reopen isn't reliable on-watch.
+  openConfig(unsavedLogin ? "ha" : "main");
   // Refresh the cached sensor list in the background so the next time the HA
   // view opens (or the user picks a sensor) the names/areas are up to date.
   refreshSensorCache();

@@ -118,7 +118,8 @@
         <!-- Not connected (or a not-yet-saved disconnect): enter URL + log in -->
         <div id="ha-disconnected">
           <div class="ha-status" id="ha-pending-note" style="display:none; border-left:4px solid #f44336;">
-            Home Assistant will be disconnected when you tap <strong>Save</strong>.
+            Home Assistant will be disconnected when you go back and tap
+            <strong>Save</strong> in Settings.
             <div class="url">Nothing is saved yet.</div>
           </div>
           <button type="button" class="link" id="ha-keep" style="display:none">&lsaquo; Keep connected</button>
@@ -126,6 +127,11 @@
           <input type="url" id="ha-url" placeholder="https://your-home.example.com" autocapitalize="off" autocorrect="off" spellcheck="false">
           <p class="hint">Use a <strong>remote</strong> URL (e.g. your Nabu Casa address or a reverse-proxied https URL) so the watch works everywhere, not just on your home Wi&#8209;Fi.</p>
           <p class="hint">Recommended: create a <strong>dedicated Home Assistant user</strong> for the watch with limited permissions instead of using your admin account.</p>
+          <div class="ha-status" style="border-left:4px solid #ff9800;">
+            After you tap log in, Home Assistant opens its own login screen and
+            <strong>Settings will close</strong>. Reopen Settings from the Pebble
+            app afterwards to pick your sensor and save.
+          </div>
           <button type="button" id="ha-login">Log in to Home Assistant</button>
         </div>
 
@@ -136,7 +142,7 @@
             <div class="url" id="ha-url-shown"></div>
           </div>
           <div class="ha-status" id="ha-unsaved-note" style="display:none; border-left:4px solid #18bcf2;">
-            Not saved yet — tap <strong>Save</strong> to apply.
+            Not saved yet — go back and tap <strong>Save</strong> in Settings to apply.
           </div>
           <p class="sub" id="ha-sensors"></p>
           <legend>Home temperature sensor</legend>
@@ -144,8 +150,7 @@
           <div class="picker">
             <div class="picker-list" id="ha-picker"></div>
           </div>
-          <p class="hint">Pick the temperature sensor for the home badge, then tap Save. Names and areas come from Home Assistant.</p>
-          <button type="submit">Save</button>
+          <p class="hint">Pick the temperature sensor for the home badge, then go back and tap <strong>Save</strong> in Settings. Names and areas come from Home Assistant.</p>
           <button type="button" class="danger" id="ha-disconnect">Disconnect Home Assistant</button>
         </div>
       </div>
@@ -389,13 +394,16 @@
       }
 
       // --- Save (closes the page; the platform's only channel back to pkjs) --
-      // Both Save buttons submit this one form. pkjs (index.ts) receives the
-      // payload in webviewclosed, stores it, and sends it to the watch. The HA
-      // connection state is committed here via haConnected: a false value tells
-      // pkjs to disconnect, true keeps/commits the (possibly just-logged-in)
-      // connection.
+      // Only the main-view Save button submits the form. The HA subview has no
+      // Save of its own — its draft (connect/disconnect + selected sensor) is
+      // carried into this one payload and applied when the user saves Settings.
+      // pkjs (index.ts) receives the payload in webviewclosed, stores it, and
+      // sends it to the watch. haConnected commits/clears the HA connection.
       form.addEventListener('submit', function (e) {
         e.preventDefault();
+        // Ignore implicit submits (e.g. Enter in the HA URL/search fields) while
+        // the HA subview is open, so typing never closes Settings unexpectedly.
+        if (viewHa.style.display !== 'none') return;
         var payload = {
           theme: form.querySelector('input[name=theme]:checked').value,
           weather: form.querySelector('input[name=weather]').checked,
