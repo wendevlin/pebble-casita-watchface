@@ -91,12 +91,15 @@ temperature sensor — showing each sensor's friendly name and area, like the
 Home Assistant frontend picker — and a **Disconnect** button. Pick a sensor and
 tap **Save**.
 
-**Disconnect is deferred:** tapping it doesn't leave the page — it marks a
-pending disconnect (with a banner and a "Keep connected" undo) and only actually
-disconnects when you tap **Save**, so the whole flow stays inside settings.
-(Connecting can't be deferred the same way: logging in must navigate to Home
-Assistant's own OAuth screen, but that returns you to the connected page to pick
-a sensor and save.)
+**Connecting and disconnecting are only applied on Save**, exactly like every
+other setting. Tapping **Disconnect** immediately flips the page to the
+disconnected (connect) view — with a "will disconnect when you save" note and a
+**Keep connected** undo — but nothing is actually cleared until you tap the main
+**Save**. Likewise a fresh login is a *draft*: the connected page shows a
+"Not saved yet — tap Save to apply" hint, and if you close settings without
+saving, the login is discarded on the next open. (The login step itself still
+has to navigate to Home Assistant's own OAuth screen, which is why it returns you
+to the connected page to pick a sensor and save.)
 
 How it works (all phone-side; wiring the actual badge is a later step):
 
@@ -117,8 +120,11 @@ How it works (all phone-side; wiring the actual badge is a later step):
   immediately, and refreshed in the background on open.
 - The config page is a small two-view SPA (main settings + the Home Assistant
   page); switching views is client-side, so opening the Home Assistant page does
-  **not** close settings. Only **Save**, the **login** redirect, and
-  **Disconnect** navigate to `pebblejs://close#…`.
+  **not** close settings. Only **Save** and the **login** redirect navigate to
+  `pebblejs://close#…`. Connect/disconnect are staged as an in-page draft and
+  sent to pkjs as a `haConnected` boolean in the Save payload; pkjs commits or
+  clears the connection accordingly, and discards any unsaved login on the next
+  open.
 - The OAuth URL building, state encoding, token bodies, the sensor template, and
   sensor-list parsing/search are pure functions in `src/pkjs/ha.ts` (unit-tested
   in `tests/ha.test.ts`). The config webview re-implements the tiny

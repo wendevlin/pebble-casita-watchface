@@ -35,6 +35,7 @@ const WEATHER_REFRESH_MS = 30 * 60 * 1000;
 
 interface HaConfig {
   connected: boolean;
+  unsaved: boolean;
   url: string;
   sensors: number;
   selected: string;
@@ -105,6 +106,13 @@ function boolPref(key: string, fallback: boolean): boolean {
 }
 
 // --- Home Assistant connection state (persisted in pkjs localStorage) ------
+//
+// Two layers: the *committed* connection (`haConnected` + tokens/sensors/
+// selection) is the saved state; `haDraftConnected` is the connection state the
+// config page is currently showing. The draft only becomes committed when the
+// user taps Save. This makes both connect and disconnect behave like the rest
+// of the settings — staged in the page, applied on Save. An unsaved login (draft
+// connected but not committed) is discarded on the next config open.
 
 function cachedSensorList(): HaSensor[] {
   const raw = localStorage.getItem("haSensorsJson");
@@ -117,12 +125,25 @@ function cachedSensorList(): HaSensor[] {
   }
 }
 
+function committedConnected(): boolean {
+  return localStorage.getItem("haConnected") === "1";
+}
+
+function draftConnected(): boolean {
+  const d = localStorage.getItem("haDraftConnected");
+  if (d === "1") return true;
+  if (d === "0") return false;
+  return committedConnected();
+}
+
 function haStatus(): HaConfig {
-  const connected = localStorage.getItem("haConnected") === "1";
+  const connected = draftConnected();
   const list = cachedSensorList();
   const storedCount = parseInt(localStorage.getItem("haSensorCount") || "", 10);
   return {
     connected: connected,
+    // The connection is shown but not yet saved (e.g. a just-completed login).
+    unsaved: connected && !committedConnected(),
     url: localStorage.getItem("haUrl") || "",
     sensors: isNaN(storedCount) ? list.length : storedCount,
     selected: localStorage.getItem("haSensorEntity") || "",
@@ -134,6 +155,7 @@ function haStatus(): HaConfig {
 
 function clearHaConnection(): void {
   localStorage.removeItem("haConnected");
+  localStorage.removeItem("haDraftConnected");
   localStorage.removeItem("haUrl");
   localStorage.removeItem("haAccessToken");
   localStorage.removeItem("haRefreshToken");
@@ -418,7 +440,11 @@ function handleHaCode(code: string, state: string): void {
     localStorage.setItem("haAccessToken", token.access_token);
     if (token.refresh_token) localStorage.setItem("haRefreshToken", token.refresh_token);
     localStorage.setItem("haExpiresAt", String(expiresAt));
-    localStorage.setItem("haConnected", "1");
+    // A fresh login is only a DRAFT connection: tokens are stored so the sensor
+    // picker works, but the connection isn't committed to the watch until the
+    // user taps Save. If they close without saving, showConfiguration discards
+    // this orphaned login on the next open.
+    localStorage.setItem("haDraftConnected", "1");
     // Fetch the sensor list, cache it, then reopen the config straight into the
     // Home Assistant view so the user lands back in settings (now connected and
     // ready to pick a sensor) instead of being left with a closed page.
@@ -436,6 +462,15 @@ function handleHaCode(code: string, state: string): void {
 }
 
 Pebble.addEventListener("showConfiguration", function () {
+  // Discard any unsaved login: if a previous session logged in but closed the
+  // page without tapping Save, the connection was never committed — drop the
+  // orphaned tokens so we open in a clean, truly-disconnected state.
+  if (!committedConnected()) {
+    clearHaConnection();
+  } else {
+    // Start the page's draft in sync with the committed (saved) connection.
+    localStorage.setItem("haDraftConnected", "1");
+  }
   openConfig("main");
   // Refresh the cached sensor list in the background so the next time the HA
   // view opens (or the user picks a sensor) the names/areas are up to date.
@@ -459,7 +494,7 @@ Pebble.addEventListener("webviewclosed", function (e) {
     state?: string;
     error?: string;
     haSensor?: string;
-    haDisconnect?: boolean;
+    haConnected?: boolean;
   } & Partial<Config>;
   try {
     parsed = JSON.parse(decodeURIComponent(e.response));
@@ -488,13 +523,22 @@ Pebble.addEventListener("webviewclosed", function (e) {
   localStorage.setItem("showBattery", config.battery ? "1" : "0");
   localStorage.setItem("badgeOrder", badgeOrderToCode(normalizeBadgeOrder(config.order)));
   localStorage.setItem("showSeconds", config.seconds ? "1" : "0");
-  // A pending disconnect is only committed here, on Save. Otherwise persist the
-  // selected home-temperature sensor (only meaningful while connected).
-  if (parsed.haDisconnect) {
+  // The HA connection is committed here, on Save, from the page's draft state:
+  //   haConnected === false -> the user disconnected (or never connected): clear
+  //                            everything.
+  //   haConnected === true  -> keep/commit the connection (promoting a fresh,
+  //                            still-draft login to the saved state) and persist
+  //                            the selected home-temperature sensor.
+  if (parsed.haConnected === false) {
     clearHaConnection();
     console.log("Casita: HA disconnected (on save)");
-  } else if (typeof parsed.haSensor === "string" && localStorage.getItem("haConnected") === "1") {
-    localStorage.setItem("haSensorEntity", parsed.haSensor);
+  } else if (parsed.haConnected === true && localStorage.getItem("haAccessToken")) {
+    localStorage.setItem("haConnected", "1");
+    localStorage.setItem("haDraftConnected", "1");
+    if (typeof parsed.haSensor === "string") {
+      localStorage.setItem("haSensorEntity", parsed.haSensor);
+    }
+    console.log("Casita: HA connection saved");
   }
   sendSettings();
   fetchWeather();
