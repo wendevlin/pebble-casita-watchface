@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Casita — connecting…</title>
+    <style>
+      body { font-family: -apple-system, Roboto, Helvetica, sans-serif; margin: 0; padding: 40px; color: #1c1c1e; background: #f2f4f9; text-align: center; }
+      p { line-height: 1.5; color: #444; }
+      a { color: #18bcf2; }
+    </style>
+  </head>
+  <body>
+    <h1>Casita</h1>
+    <p id="msg">Finishing sign-in… returning to your watch.</p>
+    <p><a id="manual" href="#">Tap here if you are not returned automatically.</a></p>
+    <script>
+      // Home Assistant redirected the browser here with ?code=&state= (or
+      // ?error=). The Pebble app exposes a single way back from a webview:
+      // navigating to pebblejs://close#<data>. We package the OAuth result and
+      // navigate there; pkjs (src/pkjs/index.ts) receives it in webviewclosed,
+      // exchanges the code for tokens, and counts temperature sensors.
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        var payload = {
+          action: 'ha_code',
+          code: params.get('code') || '',
+          state: params.get('state') || '',
+          error: params.get('error') || ''
+        };
+        var closeUrl = 'pebblejs://close#' + encodeURIComponent(JSON.stringify(payload));
+        document.getElementById('manual').setAttribute('href', closeUrl);
+        if (payload.error) {
+          document.getElementById('msg').textContent =
+            'Home Assistant reported an error: ' + payload.error;
+        }
+        window.location.replace(closeUrl);
+      })();
+    </script>
+  </body>
+</html>

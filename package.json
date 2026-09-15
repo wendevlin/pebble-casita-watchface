@@ -1,0 +1,109 @@
+{
+  "name": "casita-watchface",
+  "author": "Wendelin",
+  "version": "0.1.0",
+  "keywords": ["pebble-app"],
+  "private": true,
+  "license": "MIT",
+  "dependencies": {},
+  "scripts": {
+    "resources": "python3 tools/svg2pdc.py --normalize --out resources/casita casita-svgs/Normal.svg casita-svgs/Happy.svg casita-svgs/Grinning.svg && python3 tools/svg2pdc.py --normalize --body-color '#f7931e' --out resources/casita 'casita-svgs/No internet.svg' && python3 tools/svg2pdc.py --normalize --body-color '#999999' --out resources/casita casita-svgs/Sleeping.svg && python3 tools/svg2pdc.py --out resources/icons mdi-svgs/thermometer.svg mdi-svgs/shoe-print.svg mdi-svgs/calendar-blank.svg && python3 tools/svg2pdc.py --normalize --body-color '#f44336' --name batterylow.pdc --out resources/icons mdi-svgs/battery.svg && python3 tools/svg2pdc.py --normalize --body-color '#ff9800' --name batterymedium.pdc --out resources/icons mdi-svgs/battery.svg && python3 tools/svg2pdc.py --normalize --body-color '#4caf50' --name batteryhigh.pdc --out resources/icons mdi-svgs/battery.svg",
+    "typecheck": "bun run render-config && tsc --noEmit && tsc -p tsconfig.pkjs.json",
+    "test": "bun test",
+    "render-config": "bun tools/render-config.mjs",
+    "build:pkjs": "bun run render-config && bun build src/pkjs/index.ts --outfile src/pkjs/index.js --target browser --format iife",
+    "build": "bun run resources && bun run build:pkjs && pebble build",
+    "clean": "pebble clean",
+    "emulator:emery": "pebble install --emulator emery --logs",
+    "emulator:gabbro": "pebble install --emulator gabbro --logs"
+  },
+  "pebble": {
+    "displayName": "Casita",
+    "uuid": "ccaf2e63-9f29-4534-877d-23072a555a38",
+    "projectType": "moddable",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "emery",
+      "gabbro"
+    ],
+    "watchapp": {
+      "watchface": true
+    },
+    "capabilities": [
+      "configurable"
+    ],
+    "messageKeys": [
+      "THEME",
+      "WEATHER_TEMP",
+      "SHOW_WEATHER",
+      "SHOW_STEPS",
+      "SHOW_DATE",
+      "BADGE_ORDER",
+      "SHOW_SECONDS",
+      "SHOW_BATTERY"
+    ],
+    "resources": {
+      "media": [
+        {
+          "type": "raw",
+          "name": "CASITA_NORMAL",
+          "file": "casita/normal.pdc"
+        },
+        {
+          "type": "raw",
+          "name": "CASITA_HAPPY",
+          "file": "casita/happy.pdc"
+        },
+        {
+          "type": "raw",
+          "name": "CASITA_GRINNING",
+          "file": "casita/grinning.pdc"
+        },
+        {
+          "type": "raw",
+          "name": "CASITA_SLEEPING",
+          "file": "casita/sleeping.pdc"
+        },
+        {
+          "type": "raw",
+          "name": "CASITA_DISCONNECTED",
+          "file": "casita/disconnected.pdc"
+        },
+        {
+          "type": "raw",
+          "name": "ICON_THERMOMETER",
+          "file": "icons/thermometer.pdc"
+        },
+        {
+          "type": "raw",
+          "name": "ICON_SHOEPRINT",
+          "file": "icons/shoeprint.pdc"
+        },
+        {
+          "type": "raw",
+          "name": "ICON_CALENDARBLANK",
+          "file": "icons/calendarblank.pdc"
+        },
+        {
+          "type": "raw",
+          "name": "ICON_BATTERY_LOW",
+          "file": "icons/batterylow.pdc"
+        },
+        {
+          "type": "raw",
+          "name": "ICON_BATTERY_MEDIUM",
+          "file": "icons/batterymedium.pdc"
+        },
+        {
+          "type": "raw",
+          "name": "ICON_BATTERY_HIGH",
+          "file": "icons/batteryhigh.pdc"
+        }
+      ]
+    }
+  },
+  "devDependencies": {
+    "eta": "^4.6.0"
+  }
+}

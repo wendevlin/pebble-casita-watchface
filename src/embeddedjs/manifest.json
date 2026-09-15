@@ -1,0 +1,19 @@
+{
+ 	"include":  [
+		"$(MODDABLE)/examples/manifest_mod.json",
+		"$(MODDABLE)/examples/manifest_typings.json"
+	],
+	"modules": {
+		"*": "./main",
+		"logic": "./logic",
+		"constants": "./constants",
+		"gfx": "./gfx",
+		"data/settings": "./data/settings",
+		"draw/casita": "./draw/casita",
+		"draw/badges": "./draw/badges",
+		"draw/face": "./draw/face",
+		"wake": "./wake",
+		"hw": "./hw",
+		"ffi": "./ffi"
+	}
+}

@@ -1,0 +1,31 @@
+# Pebble build output
+build/
+*.pbw
+
+# Waf build lock
+.lock-waf_*
+
+# Generated PDC resources (regenerate with `bun run resources`)
+resources/casita/*.pdc
+resources/icons/*.pdc
+
+# Generated PebbleKit JS (transpiled from src/pkjs/index.ts by `bun run build:pkjs`)
+src/pkjs/index.js
+# Generated settings markup (rendered from src/pkjs/config.eta by `bun run render-config`)
+src/pkjs/config-html.ts
+
+# Dependencies
+node_modules/
+
+# npm lockfile — this project uses Bun (bun.lock)
+package-lock.json
+
+# Emulator screenshots
+pebble_screenshot_*.png
+
+# Crash / diagnostic dumps
+report.*.json
+
+# OS / editor cruft
+.DS_Store
+*.swp

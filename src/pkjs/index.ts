@@ -1,0 +1,395 @@
+/*
+ * Phone-side PebbleKit JS for the Casita watchface.
+ *
+ * Provides the settings page (light/dark theme + which badges to show) shown
+ * from the Pebble app, and fetches the current weather for the temperature
+ * badge. Preferences are persisted on the phone and pushed to the watch over
+ * AppMessage; the watch also persists them locally so they survive relaunches.
+ *
+ * Weather comes from Open-Meteo (no API key required); the temperature is sent
+ * in tenths of a degree Celsius and the watch decides whether to show °C or °F
+ * based on its own measurement-system (units) setting.
+ *
+ * NOTE: this file is authored in TypeScript and bundled to `src/pkjs/index.js`
+ * (the file the Pebble bundler actually ships) by `bun run build:pkjs`. The
+ * settings page markup lives in `src/pkjs/config.eta` and is rendered to
+ * `config-html.ts` at build time. Do not edit the generated .js by hand.
+ */
+
+import { CONFIG_HTML } from "./config-html";
+import {
+  HA_CLIENT_ID,
+  HA_REDIRECT_URI,
+  decodeState,
+  tokenExchangeBody,
+  tokenRefreshBody,
+  countTemperatureSensors,
+  normalizeHaUrl,
+} from "./ha";
+
+const WEATHER_REFRESH_MS = 30 * 60 * 1000;
+
+interface HaConfig {
+  connected: boolean;
+  url: string;
+  sensors: number;
+  clientId: string;
+  redirectUri: string;
+}
+
+interface Config {
+  theme: string;
+  weather: boolean;
+  steps: boolean;
+  date: boolean;
+  battery: boolean;
+  order: string[];
+  seconds: boolean;
+  ha: HaConfig;
+}
+
+// Badge order (mirrors src/embeddedjs/logic.ts): the order is persisted/sent as
+// the compact code string "dwsb" (date/weather/steps/battery). Kept as a tiny
+// local copy so the phone bundle stays self-contained (it can't import the
+// watch modules).
+const BADGE_IDS = ["date", "weather", "steps", "battery"];
+const BADGE_CODE: { [id: string]: string } = { date: "d", weather: "w", steps: "s", battery: "b" };
+const BADGE_BY_CODE: { [code: string]: string } = { d: "date", w: "weather", s: "steps", b: "battery" };
+
+function normalizeBadgeOrder(value: string[] | string | null): string[] {
+  let tokens: string[];
+  if (value == null) {
+    return BADGE_IDS.slice();
+  } else if (typeof value === "string") {
+    tokens = value.indexOf(",") >= 0 ? value.split(",") : value.split("");
+  } else {
+    tokens = value.map(function (v) { return String(v); });
+  }
+  const order: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const id = BADGE_BY_CODE[token] || token;
+    if (BADGE_IDS.indexOf(id) >= 0 && order.indexOf(id) < 0) order.push(id);
+  }
+  for (let j = 0; j < BADGE_IDS.length; j++) {
+    if (order.indexOf(BADGE_IDS[j]) < 0) order.push(BADGE_IDS[j]);
+  }
+  return order;
+}
+
+function badgeOrderToCode(order: string[]): string {
+  return order.map(function (id) { return BADGE_CODE[id]; }).join("");
+}
+
+function currentBadgeOrder(): string[] {
+  return normalizeBadgeOrder(localStorage.getItem("badgeOrder"));
+}
+
+function currentTheme(): string {
+  const stored = localStorage.getItem("theme");
+  return stored === "light" || stored === "dark" ? stored : "dark";
+}
+
+function boolPref(key: string, fallback: boolean): boolean {
+  const v = localStorage.getItem(key);
+  if (v === "1") return true;
+  if (v === "0") return false;
+  return fallback;
+}
+
+// --- Home Assistant connection state (persisted in pkjs localStorage) ------
+
+function haStatus(): HaConfig {
+  const connected = localStorage.getItem("haConnected") === "1";
+  const sensors = parseInt(localStorage.getItem("haSensorCount") || "0", 10);
+  return {
+    connected: connected,
+    url: localStorage.getItem("haUrl") || "",
+    sensors: isNaN(sensors) ? 0 : sensors,
+    clientId: HA_CLIENT_ID,
+    redirectUri: HA_REDIRECT_URI,
+  };
+}
+
+function clearHaConnection(): void {
+  localStorage.removeItem("haConnected");
+  localStorage.removeItem("haUrl");
+  localStorage.removeItem("haAccessToken");
+  localStorage.removeItem("haRefreshToken");
+  localStorage.removeItem("haExpiresAt");
+  localStorage.removeItem("haSensorCount");
+}
+
+/**
+ * Builds the settings page URL. The static markup comes from the build-time
+ * rendered template; the current preferences are injected by replacing the
+ * `__CONFIG__` token with a JSON blob the page's inline script applies.
+ */
+function configPage(
+  theme: string,
+  showWeather: boolean,
+  showSteps: boolean,
+  showDate: boolean,
+  showBattery: boolean,
+  order: string[],
+  showSeconds: boolean,
+): string {
+  const config: Config = {
+    theme: theme === "light" ? "light" : "dark",
+    weather: showWeather,
+    steps: showSteps,
+    date: showDate,
+    battery: showBattery,
+    order: order,
+    seconds: showSeconds,
+    ha: haStatus(),
+  };
+  const html = CONFIG_HTML.replace("__CONFIG__", JSON.stringify(config));
+  return "data:text/html," + encodeURIComponent(html);
+}
+
+function sendSettings(): void {
+  Pebble.sendAppMessage(
+    {
+      THEME: currentTheme() === "dark" ? 1 : 0,
+      SHOW_WEATHER: boolPref("showWeather", true) ? 1 : 0,
+      SHOW_STEPS: boolPref("showSteps", true) ? 1 : 0,
+      SHOW_DATE: boolPref("showDate", true) ? 1 : 0,
+      SHOW_BATTERY: boolPref("showBattery", true) ? 1 : 0,
+      BADGE_ORDER: badgeOrderToCode(currentBadgeOrder()),
+      SHOW_SECONDS: boolPref("showSeconds", false) ? 1 : 0,
+    },
+    function () {},
+    function (e) {
+      console.log("Casita: failed to send settings: " + JSON.stringify(e));
+    }
+  );
+}
+
+function sendWeatherTemp(tenthsC: number): void {
+  Pebble.sendAppMessage(
+    { WEATHER_TEMP: tenthsC },
+    function () {},
+    function (e) {
+      console.log("Casita: failed to send weather: " + JSON.stringify(e));
+    }
+  );
+}
+
+function fetchWeather(): void {
+  if (!boolPref("showWeather", true)) {
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    function (pos) {
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      const url =
+        "https://api.open-meteo.com/v1/forecast?latitude=" + lat +
+        "&longitude=" + lon + "&current=temperature_2m";
+      const xhr = new XMLHttpRequest();
+      xhr.onload = function () {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          const t = data && data.current && data.current.temperature_2m;
+          if (typeof t === "number") {
+            sendWeatherTemp(Math.round(t * 10));
+          } else {
+            console.log("Casita: no temperature in weather response");
+          }
+        } catch (err) {
+          console.log("Casita: weather parse error: " + err);
+        }
+      };
+      xhr.onerror = function () {
+        console.log("Casita: weather request failed");
+      };
+      xhr.open("GET", url, true);
+      xhr.send();
+    },
+    function (err) {
+      console.log("Casita: geolocation error: " + JSON.stringify(err));
+    },
+    { timeout: 15000, maximumAge: WEATHER_REFRESH_MS }
+  );
+}
+
+Pebble.addEventListener("ready", function () {
+  sendSettings();
+  fetchWeather();
+  setInterval(fetchWeather, WEATHER_REFRESH_MS);
+});
+
+// --- Home Assistant OAuth (phone-side) -------------------------------------
+// The config webview navigates to HA's own login screen; HA redirects through
+// our hosted callback page, which hands the auth code back here via the
+// webviewclosed handler. We exchange it for tokens, then count how many
+// temperature sensors the instance exposes so the settings page can prove the
+// connection works.
+
+function fetchTemperatureSensors(
+  haUrl: string,
+  accessToken: string,
+  cb: (count: number | null) => void,
+): void {
+  const xhr = new XMLHttpRequest();
+  xhr.open("GET", haUrl + "/api/states", true);
+  xhr.setRequestHeader("Authorization", "Bearer " + accessToken);
+  xhr.onload = function () {
+    try {
+      const states = JSON.parse(xhr.responseText);
+      cb(countTemperatureSensors(states));
+    } catch (err) {
+      console.log("Casita: HA states parse error: " + err);
+      cb(null);
+    }
+  };
+  xhr.onerror = function () {
+    console.log("Casita: HA states request failed");
+    cb(null);
+  };
+  xhr.send();
+}
+
+function refreshHaToken(cb: (accessToken: string | null) => void): void {
+  const haUrl = localStorage.getItem("haUrl") || "";
+  const refreshToken = localStorage.getItem("haRefreshToken") || "";
+  if (!haUrl || !refreshToken) {
+    cb(null);
+    return;
+  }
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", haUrl + "/auth/token", true);
+  xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+  xhr.onload = function () {
+    let token;
+    try {
+      token = JSON.parse(xhr.responseText);
+    } catch (err) {
+      console.log("Casita: HA refresh parse error: " + err);
+      cb(null);
+      return;
+    }
+    if (!token || !token.access_token) {
+      cb(null);
+      return;
+    }
+    const expiresAt = Date.now() + (Number(token.expires_in) || 1800) * 1000;
+    localStorage.setItem("haAccessToken", token.access_token);
+    localStorage.setItem("haExpiresAt", String(expiresAt));
+    cb(token.access_token);
+  };
+  xhr.onerror = function () {
+    cb(null);
+  };
+  xhr.send(tokenRefreshBody(refreshToken, HA_CLIENT_ID));
+}
+
+function handleHaCode(code: string, state: string): void {
+  let haUrl: string;
+  try {
+    haUrl = normalizeHaUrl(decodeState(state).haUrl);
+  } catch (err) {
+    console.log("Casita: bad HA state: " + err);
+    return;
+  }
+  if (!haUrl || !code) {
+    console.log("Casita: HA login missing url/code");
+    return;
+  }
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", haUrl + "/auth/token", true);
+  xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+  xhr.onload = function () {
+    if (xhr.status < 200 || xhr.status >= 300) {
+      console.log("Casita: HA token exchange failed: " + xhr.status + " " + xhr.responseText);
+      return;
+    }
+    let token;
+    try {
+      token = JSON.parse(xhr.responseText);
+    } catch (err) {
+      console.log("Casita: HA token parse error: " + err);
+      return;
+    }
+    if (!token || !token.access_token) {
+      console.log("Casita: HA token response missing access_token");
+      return;
+    }
+    const expiresAt = Date.now() + (Number(token.expires_in) || 1800) * 1000;
+    localStorage.setItem("haUrl", haUrl);
+    localStorage.setItem("haAccessToken", token.access_token);
+    if (token.refresh_token) localStorage.setItem("haRefreshToken", token.refresh_token);
+    localStorage.setItem("haExpiresAt", String(expiresAt));
+    localStorage.setItem("haConnected", "1");
+    fetchTemperatureSensors(haUrl, token.access_token, function (count) {
+      localStorage.setItem("haSensorCount", String(count == null ? 0 : count));
+      console.log("Casita: HA connected, " + (count == null ? "unknown" : count) + " temp sensors");
+    });
+  };
+  xhr.onerror = function () {
+    console.log("Casita: HA token request failed");
+  };
+  xhr.send(tokenExchangeBody(code, HA_CLIENT_ID, HA_REDIRECT_URI));
+}
+
+Pebble.addEventListener("showConfiguration", function () {
+  Pebble.openURL(
+    configPage(
+      currentTheme(),
+      boolPref("showWeather", true),
+      boolPref("showSteps", true),
+      boolPref("showDate", true),
+      boolPref("showBattery", true),
+      currentBadgeOrder(),
+      boolPref("showSeconds", false)
+    )
+  );
+});
+
+// The settings live in TWO isolated JS sandboxes that cannot see each other:
+//   1. the config webview (config.eta) - its own browser localStorage; pkjs and
+//      the watch cannot read it. Its only way out is navigating to the close URL.
+//   2. this pkjs runtime - the close URL fragment arrives here as e.response.
+// So this handler is the single point where settings cross over: we persist them
+// to *pkjs* localStorage (so we remember them across restarts) and then push them
+// to the watch via sendAppMessage - the watch never reads localStorage directly.
+Pebble.addEventListener("webviewclosed", function (e) {
+  if (!e || !e.response) {
+    return;
+  }
+  let parsed: { action?: string; code?: string; state?: string; error?: string } & Partial<Config>;
+  try {
+    parsed = JSON.parse(decodeURIComponent(e.response));
+  } catch (err) {
+    console.log("Casita: bad config response: " + e.response);
+    return;
+  }
+
+  // Home Assistant flows carry an explicit action; the settings Save carries none.
+  if (parsed.action === "ha_code") {
+    if (parsed.error) {
+      console.log("Casita: HA login error: " + parsed.error);
+      return;
+    }
+    handleHaCode(parsed.code || "", parsed.state || "");
+    return;
+  }
+  if (parsed.action === "ha_disconnect") {
+    clearHaConnection();
+    console.log("Casita: HA disconnected");
+    return;
+  }
+
+  const config = parsed as Config;
+  const theme = config.theme === "light" ? "light" : "dark";
+  localStorage.setItem("theme", theme);
+  localStorage.setItem("showWeather", config.weather ? "1" : "0");
+  localStorage.setItem("showSteps", config.steps ? "1" : "0");
+  localStorage.setItem("showDate", config.date ? "1" : "0");
+  localStorage.setItem("showBattery", config.battery ? "1" : "0");
+  localStorage.setItem("badgeOrder", badgeOrderToCode(normalizeBadgeOrder(config.order)));
+  localStorage.setItem("showSeconds", config.seconds ? "1" : "0");
+  sendSettings();
+  fetchWeather();
+});

@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2020"],
+    "strict": true,
+    "noEmit": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "types": [],
+    "paths": {
+      "commodetto/Poco": ["./types/moddable-pebble"],
+      "logic": ["./src/embeddedjs/logic"],
+      "constants": ["./src/embeddedjs/constants"],
+      "gfx": ["./src/embeddedjs/gfx"],
+      "data/settings": ["./src/embeddedjs/data/settings"],
+      "draw/casita": ["./src/embeddedjs/draw/casita"],
+      "draw/badges": ["./src/embeddedjs/draw/badges"],
+      "draw/face": ["./src/embeddedjs/draw/face"],
+      "wake": ["./src/embeddedjs/wake"],
+      "hw": ["./src/embeddedjs/hw"],
+      "ffi": ["./src/embeddedjs/ffi"]
+    }
+  },
+  "include": [
+    "src/embeddedjs/**/*.ts",
+    "types/**/*.d.ts"
+  ]
+}
