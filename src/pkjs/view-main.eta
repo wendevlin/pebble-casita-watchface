@@ -1,0 +1,41 @@
+<div id="view-main">
+  <h1>Casita</h1>
+  <p class="sub">Watchface settings</p>
+  <fieldset>
+    <legend>Appearance</legend>
+    <select name="theme">
+      <% it.themes.forEach(function (t) { %>
+      <option value="<%= t.value %>"><%= t.label %></option>
+      <% }) %>
+    </select>
+  </fieldset>
+  <fieldset>
+    <legend>Clock</legend>
+    <label><input type="checkbox" name="seconds"> Show seconds when the light is on</label>
+    <p class="hint">Raise your wrist, shake, or tap to light the screen and reveal seconds for a few seconds.</p>
+  </fieldset>
+  <fieldset>
+    <legend>Badges</legend>
+    <p class="hint">Toggle badges and use ▲ ▼ to set their left-to-right order.</p>
+    <ul class="badges" id="badges">
+      <% it.badges.forEach(function (b) { %>
+      <li class="badge" data-badge="<%= b.name %>"<% if (b.name === 'home') { %> style="display:none"<% } %>>
+        <label><input type="checkbox" name="<%= b.name %>"> <%= b.label %></label>
+        <span class="reorder">
+          <button type="button" class="up" aria-label="Move up">&#9650;</button>
+          <button type="button" class="down" aria-label="Move down">&#9660;</button>
+        </span>
+      </li>
+      <% }) %>
+    </ul>
+  </fieldset>
+  <fieldset>
+    <legend>Home Assistant</legend>
+    <button type="button" class="ha-entry" id="ha-open">
+      <span class="dot"></span>
+      <span id="ha-entry-label">Connect Home Assistant</span>
+      <span class="chev">&rsaquo;</span>
+    </button>
+  </fieldset>
+  <button type="submit">Save</button>
+</div>

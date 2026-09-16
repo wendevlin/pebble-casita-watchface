@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install
+
+      - name: Render config template
+        run: bun run render-config
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Run tests
+        run: bun test
+
+  build:
+    name: Build .pbw
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: bun install
+
+      - name: Install pebble-tool
+        run: pip install pebble-tool
+
+      - name: Install Pebble SDK
+        run: |
+          pebble sdk set-channel release
+          yes | pebble sdk install 4.33.1
+
+      - name: Build pkjs bundle
+        run: bun run build:pkjs
+
+      - name: Generate PDC resources
+        run: bun run resources
+
+      - name: Build .pbw
+        run: pebble build
+
+      - name: Upload .pbw artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: casita-watchface
+          path: build/casita-watchface.pbw

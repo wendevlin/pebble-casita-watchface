@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    name: Build & Publish to Pebble Appstore
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: bun install
+
+      - name: Install pebble-tool
+        run: pip install pebble-tool
+
+      - name: Install Pebble SDK
+        run: |
+          pebble sdk set-channel release
+          yes | pebble sdk install 4.33.1
+
+      - name: Build pkjs bundle
+        run: bun run build:pkjs
+
+      - name: Generate PDC resources
+        run: bun run resources
+
+      - name: Build .pbw
+        run: pebble build
+
+      - name: Publish to Pebble Appstore
+        env:
+          PEBBLE_FIREBASE_ID_TOKEN: ${{ secrets.PEBBLE_FIREBASE_ID_TOKEN }}
+        run: |
+          pebble publish \
+            --non-interactive \
+            --description "${{ github.event.release.body }}" \
+            --release-notes "${{ github.event.release.body }}" \
+            --no-gif-all-platforms \
+            --screenshots docs/screenshots/emery_casita-light.jpg docs/screenshots/emery_casita-dark.jpg
+
+      - name: Attach .pbw to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" build/casita-watchface.pbw
