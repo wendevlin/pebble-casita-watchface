@@ -15,6 +15,7 @@
     "paths": {
       "commodetto/Poco": ["./types/moddable-pebble"],
       "logic": ["./src/embeddedjs/logic"],
+      "resource-ids": ["./src/embeddedjs/resource-ids"],
       "constants": ["./src/embeddedjs/constants"],
       "gfx": ["./src/embeddedjs/gfx"],
       "data/settings": ["./src/embeddedjs/data/settings"],

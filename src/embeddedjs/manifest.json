@@ -6,6 +6,7 @@
 	"modules": {
 		"*": "./main",
 		"logic": "./logic",
+		"resource-ids": "./resource-ids",
 		"constants": "./constants",
 		"gfx": "./gfx",
 		"data/settings": "./data/settings",

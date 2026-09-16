@@ -3,28 +3,13 @@
  * rendering code in main.ts so it can be unit-tested with `bun test`.
  */
 
-// Resource IDs assigned by `pebble build` in package.json media declaration
-// order (see pebble.resources.media).
-export enum Casita {
-  Normal = 1,
-  Happy = 2,
-  Grinning = 3,
-  Sleeping = 4,
-  Disconnected = 5,
-  Sweating = 6,
-}
-
-// MDI badge icons, converted to PDC and declared after the Casita images in
-// package.json (so their resource IDs continue the same 1-based sequence).
-export enum Icon {
-  Thermometer = 7,
-  ShoePrint = 8,
-  CalendarBlank = 9,
-  BatteryLow = 10,
-  BatteryMedium = 11,
-  BatteryHigh = 12,
-  HomeThermometer = 13,
-}
+// Resource IDs are generated from the package.json `pebble.resources.media`
+// order by tools/render-resources.mjs (`bun run render-resources`) into
+// resource-ids.ts, so they can never drift from what `pebble build` assigns —
+// a wrong id throws a fatal "not found" on the watch. Re-exported here so the
+// drawing code and tests keep importing them from "logic".
+import { Casita, Icon } from "resource-ids";
+export { Casita, Icon };
 
 /**
  * True for expressions whose art reaches into the top corners (the sleeping

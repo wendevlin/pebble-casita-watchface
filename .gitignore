@@ -13,6 +13,8 @@ resources/icons/*.pdc
 src/pkjs/index.js
 # Generated settings markup (rendered from src/pkjs/config.eta by `bun run render-config`)
 src/pkjs/config-html.ts
+# Generated resource-ID enums (derived from package.json by `bun run render-resources`)
+src/embeddedjs/resource-ids.ts
 
 # Dependencies
 node_modules/
@@ -20,8 +22,9 @@ node_modules/
 # npm lockfile — this project uses Bun (bun.lock)
 package-lock.json
 
-# Emulator screenshots
+# Emulator screenshots / recordings
 pebble_screenshot_*.png
+screenshots/
 
 # Crash / diagnostic dumps
 report.*.json

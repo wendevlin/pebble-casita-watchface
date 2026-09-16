@@ -285,6 +285,7 @@ How it works — reading the real backlight state:
 │   │   ├── constants.ts    # Storage keys, message keys, badge geometry
 │   │   ├── gfx.ts          # Shared Poco context, fonts, image caches, palette
 │   │   ├── logic.ts        # Pure expression/time/badge logic (unit-tested)
+│   │   ├── resource-ids.ts # GENERATED Casita/Icon resource-ID enums (`bun run render-resources`)
 │   │   ├── data/
 │   │   │   └── settings.ts # Persisted preferences + health/weather reads
 │   │   ├── draw/
@@ -304,9 +305,11 @@ How it works — reading the real backlight state:
 │   ├── index.html          #   OAuth client_id page
 │   └── callback.html       #   returns the auth code to the app via pebblejs://close
 ├── tests/logic.test.ts     # `bun test` unit tests for logic.ts
+├── tests/resources.test.ts # `bun test` guard: enum IDs match package.json media order
 ├── tests/ha.test.ts        # `bun test` unit tests for pkjs/ha.ts
 ├── tools/svg2pdc.py        # Self-contained SVG -> PDC converter
 ├── tools/render-config.mjs # Renders config.eta -> config-html.ts at build time
+├── tools/render-resources.mjs # Derives resource-ids.ts from package.json media order
 ├── types/moddable-pebble.d.ts  # Local typings for standalone typecheck
 ├── package.json            # Project + Pebble manifest + scripts
 ├── mise.toml               # Toolchain pinning
@@ -351,10 +354,11 @@ All scripts run through Bun (`bun run <name>`):
 
 | Script              | What it does                                                        |
 | ------------------- | ------------------------------------------------------------------- |
-| `resources`         | Regenerate `resources/casita/*.pdc` from `casita-svgs/*.svg`.        |
+| `resources`         | `render-resources` + regenerate `resources/**/*.pdc` from the SVGs.  |
 | `typecheck`         | `tsc --noEmit` for the watch code (`tsconfig.json`) **and** the phone code (`tsconfig.pkjs.json`). |
-| `test`              | `bun test` — unit tests for the pure logic in `logic.ts`.           |
+| `test`              | `render-resources` + `bun test` — unit tests for `logic.ts` / `ha.ts` and the resource-ID guard. |
 | `render-config`     | Render `src/pkjs/config.eta` (Eta) → `src/pkjs/config-html.ts`.      |
+| `render-resources`  | Derive `src/embeddedjs/resource-ids.ts` (Casita/Icon enums) from the `package.json` media order. |
 | `build:pkjs`        | `render-config` + bundle `src/pkjs/index.ts` → `src/pkjs/index.js` (Bun). |
 | `build`             | `resources` + `build:pkjs` + `pebble build` (compiles TS and packages the PBW). |
 | `clean`             | `pebble clean`.                                                     |
@@ -392,14 +396,18 @@ the badge icons:
 - Badge icons (`mdi-svgs/*.svg`) → `resources/icons/*.pdc` (accent fill baked in)
 
 The faces and badge icons are declared as `raw` media in `package.json`;
-`pebble build` assigns them numeric resource IDs in declaration order (1 = Normal
-… 5 = Disconnected, 6 = Sweating, 7 = thermometer, 8 = shoe-print). `logic.ts`'s
-`Casita` and `Icon` enums mirror those IDs, and `main.ts` draws them with
-`new Poco.PebbleDrawCommandImage(id)` + `render.drawDCI(...)` (icons are
-`clone()`d and `scale()`d down to badge size).
+`pebble build` assigns them numeric resource IDs in declaration order (1-based).
+The watch-side `Casita` and `Icon` enums are **generated** from that order by
+`tools/render-resources.mjs` into `src/embeddedjs/resource-ids.ts` (re-exported
+from `logic.ts`), and `gfx.ts` draws them with `new Poco.PebbleDrawCommandImage(id)`
++ `render.drawDCI(...)` (icons are `clone()`d and `scale()`d down to badge size).
+A wrong id throws a fatal `not found` on the watch, so the ids are never edited by
+hand; `tests/resources.test.ts` cross-checks the generated enums against
+`package.json`. Keep the PNG `APP_ICON` **after** all PDC entries — putting it
+first shifted every id and crashed the v1.0.0 store build on fresh installs.
 
-To add or swap a face, edit the `resources` script's SVG list and the
-`package.json` media array together (keeping order/IDs in sync), then
+To add or swap a face, edit the `resources` script's SVG list, the `package.json`
+media array and the name table in `tools/render-resources.mjs`, then
 `bun run resources && bun run build`.
 
 ## Running in the emulator
