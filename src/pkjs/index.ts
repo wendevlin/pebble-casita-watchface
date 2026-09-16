@@ -101,7 +101,13 @@ function currentBadgeOrder(): string[] {
 
 function currentTheme(): string {
   const stored = localStorage.getItem("theme");
-  return stored === "light" || stored === "dark" ? stored : "dark";
+  return stored === "light" || stored === "dark" || stored === "auto" ? stored : "dark";
+}
+
+// Mirror of logic.ts themeToCode: 0 = light, 1 = dark, 2 = auto.
+function themeCode(theme: string): number {
+  if (theme === "auto") return 2;
+  return theme === "dark" ? 1 : 0;
 }
 
 function boolPref(key: string, fallback: boolean): boolean {
@@ -196,7 +202,7 @@ function configPage(
   initialView: string,
 ): string {
   const config: Config = {
-    theme: theme === "light" ? "light" : "dark",
+    theme: theme === "light" || theme === "auto" ? theme : "dark",
     weather: showWeather,
     steps: showSteps,
     date: showDate,
@@ -237,7 +243,7 @@ function homeBadgeActive(): boolean {
 function sendSettings(): void {
   Pebble.sendAppMessage(
     {
-      THEME: currentTheme() === "dark" ? 1 : 0,
+      THEME: themeCode(currentTheme()),
       SHOW_WEATHER: boolPref("showWeather", true) ? 1 : 0,
       SHOW_STEPS: boolPref("showSteps", true) ? 1 : 0,
       SHOW_DATE: boolPref("showDate", true) ? 1 : 0,
@@ -273,8 +279,39 @@ function sendWeatherTemp(tenthsC: number): void {
   );
 }
 
+function sendSunTimes(sunriseMin: number, sunsetMin: number): void {
+  Pebble.sendAppMessage(
+    { SUNRISE: sunriseMin, SUNSET: sunsetMin },
+    function () {},
+    function (e) {
+      console.log("Casita: failed to send sun times: " + JSON.stringify(e));
+    }
+  );
+}
+
+// Parses an Open-Meteo local ISO timestamp ("YYYY-MM-DDTHH:MM") into minutes
+// since local midnight, or -1 when it can't be parsed.
+function isoLocalToMinutes(iso: unknown): number {
+  if (typeof iso !== "string") return -1;
+  const t = iso.indexOf("T");
+  if (t < 0) return -1;
+  const parts = iso.substr(t + 1, 5).split(":");
+  if (parts.length < 2) return -1;
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  if (isNaN(h) || isNaN(m)) return -1;
+  return h * 60 + m;
+}
+
+// Fetches the current temperature (for the weather badge) and today's sunrise/
+// sunset (for the "auto" theme) from Open-Meteo in one request. Runs whenever
+// either the weather badge is on or the auto theme is selected, since both need
+// the phone's location. Sun times use timezone=auto so they arrive in local
+// clock time, matching the watch's own local time.
 function fetchWeather(): void {
-  if (!boolPref("showWeather", true)) {
+  const wantWeather = boolPref("showWeather", true);
+  const wantSun = currentTheme() === "auto";
+  if (!wantWeather && !wantSun) {
     return;
   }
   navigator.geolocation.getCurrentPosition(
@@ -283,16 +320,25 @@ function fetchWeather(): void {
       const lon = pos.coords.longitude;
       const url =
         "https://api.open-meteo.com/v1/forecast?latitude=" + lat +
-        "&longitude=" + lon + "&current=temperature_2m";
+        "&longitude=" + lon +
+        "&current=temperature_2m&daily=sunrise,sunset&timezone=auto&forecast_days=1";
       const xhr = new XMLHttpRequest();
       xhr.onload = function () {
         try {
           const data = JSON.parse(xhr.responseText);
-          const t = data && data.current && data.current.temperature_2m;
-          if (typeof t === "number") {
-            sendWeatherTemp(Math.round(t * 10));
-          } else {
-            console.log("Casita: no temperature in weather response");
+          if (wantWeather) {
+            const t = data && data.current && data.current.temperature_2m;
+            if (typeof t === "number") {
+              sendWeatherTemp(Math.round(t * 10));
+            } else {
+              console.log("Casita: no temperature in weather response");
+            }
+          }
+          const daily = data && data.daily;
+          const sunrise = isoLocalToMinutes(daily && daily.sunrise && daily.sunrise[0]);
+          const sunset = isoLocalToMinutes(daily && daily.sunset && daily.sunset[0]);
+          if (sunrise >= 0 && sunset >= 0) {
+            sendSunTimes(sunrise, sunset);
           }
         } catch (err) {
           console.log("Casita: weather parse error: " + err);
@@ -707,7 +753,7 @@ Pebble.addEventListener("webviewclosed", function (e) {
   }
 
   const config = parsed as Config;
-  const theme = config.theme === "light" ? "light" : "dark";
+  const theme = config.theme === "light" || config.theme === "auto" ? config.theme : "dark";
   localStorage.setItem("theme", theme);
   localStorage.setItem("showWeather", config.weather ? "1" : "0");
   localStorage.setItem("showSteps", config.steps ? "1" : "0");

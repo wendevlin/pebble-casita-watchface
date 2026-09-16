@@ -18,6 +18,10 @@ export const BADGE_ORDER_KEY = "badgeOrder";
 export const SHOW_SECONDS_KEY = "showSeconds";
 export const HOME_TEMP_KEY = "homeTemp";
 export const SHOW_HOME_TEMP_KEY = "showHomeTemp";
+// Sunrise/sunset in minutes since local midnight (SUN_UNKNOWN = none yet), used
+// by the "auto" theme to switch light/dark. Pushed from the phone (Open-Meteo).
+export const SUNRISE_KEY = "sunriseMin";
+export const SUNSET_KEY = "sunsetMin";
 
 // --------------------------------------------------------------------------- //
 // AppMessage keys — MUST stay in the same order as package.json `messageKeys`
@@ -35,6 +39,8 @@ export const MESSAGE_KEYS = [
   "SHOW_BATTERY",
   "HA_TEMP",
   "SHOW_HOME_TEMP",
+  "SUNRISE",
+  "SUNSET",
 ];
 
 // --------------------------------------------------------------------------- //

@@ -418,6 +418,23 @@ def flatten_arc(start, rx, ry, rotation, large_arc, sweep, end):
     return points
 
 
+def circle_subpath(cx, cy, r):
+    """Build a closed, flattened polygon that approximates a circle.
+
+    Circles are emitted as polygon paths rather than PDC circle commands so the
+    runtime's draw-command scaling (which only transforms point coordinates,
+    never a circle's radius) shrinks them together with the rest of the image.
+    The segment count scales with the radius so the outline stays smooth.
+    """
+    segments = max(16, min(64, int(math.ceil(2 * math.pi * max(r, 0) / 1.5))))
+    sp = Subpath()
+    sp.closed = True
+    for i in range(segments):
+        t = 2 * math.pi * i / segments
+        sp.points.append((cx + r * math.cos(t), cy + r * math.sin(t)))
+    return sp
+
+
 def rounded_rect_subpath(x, y, w, h, rx, ry):
     """Build a closed, flattened rounded-rectangle subpath."""
     rx = min(rx, w / 2.0)
@@ -545,8 +562,7 @@ def build_commands(root, classes, normalize, body_rgb=BODY_RGB):
             cx = float(element.get("cx", 0))
             cy = float(element.get("cy", 0))
             r = float(element.get("r", 0))
-            center = to_pebble_point((cx, cy))
-            commands.append(CircleCommand(center, r, stroke_color, stroke_width, fill_color))
+            emit_subpath(circle_subpath(cx, cy, r), stroke_color, stroke_width, fill_color)
         elif tag == "rect":
             x = float(element.get("x", 0))
             y = float(element.get("y", 0))

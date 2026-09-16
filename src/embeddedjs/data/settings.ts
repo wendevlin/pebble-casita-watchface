@@ -14,6 +14,8 @@ import {
   SHOW_SECONDS_KEY,
   SHOW_STEPS_KEY,
   SHOW_WEATHER_KEY,
+  SUNRISE_KEY,
+  SUNSET_KEY,
   THEME_KEY,
   WEATHER_TEMP_KEY,
 } from "constants";
@@ -23,6 +25,7 @@ import {
   normalizeBadgeOrder,
   normalizeTheme,
   normalizeToggle,
+  SUN_UNKNOWN,
   Theme,
   WEATHER_UNKNOWN,
 } from "logic";
@@ -46,6 +49,17 @@ export interface Settings {
   showHomeTemp: boolean;
   /** Last HA sensor reading in tenths of a degree Celsius (WEATHER_UNKNOWN = none). */
   homeTemp: number;
+  /** Sunrise in minutes since local midnight (SUN_UNKNOWN = none yet). */
+  sunriseMin: number;
+  /** Sunset in minutes since local midnight (SUN_UNKNOWN = none yet). */
+  sunsetMin: number;
+}
+
+function readStoredMinute(key: string): number {
+  const raw = localStorage.getItem(key);
+  if (raw == null) return SUN_UNKNOWN;
+  const value = parseInt(raw, 10);
+  return isNaN(value) ? SUN_UNKNOWN : value;
 }
 
 function readStoredTemp(): number {
@@ -74,6 +88,8 @@ export const settings: Settings = {
   weatherTemp: readStoredTemp(),
   showHomeTemp: normalizeToggle(localStorage.getItem(SHOW_HOME_TEMP_KEY), true),
   homeTemp: readStoredHomeTemp(),
+  sunriseMin: readStoredMinute(SUNRISE_KEY),
+  sunsetMin: readStoredMinute(SUNSET_KEY),
 };
 
 /**
@@ -128,6 +144,20 @@ export function applyMessage(message: Map<string | number, unknown>): void {
     settings.showHomeTemp = normalizeToggle(message.get("SHOW_HOME_TEMP"), true);
     localStorage.setItem(SHOW_HOME_TEMP_KEY, settings.showHomeTemp ? "1" : "0");
   }
+  if (message.has("SUNRISE")) {
+    settings.sunriseMin = messageMinute(message.get("SUNRISE"));
+    localStorage.setItem(SUNRISE_KEY, String(settings.sunriseMin));
+  }
+  if (message.has("SUNSET")) {
+    settings.sunsetMin = messageMinute(message.get("SUNSET"));
+    localStorage.setItem(SUNSET_KEY, String(settings.sunsetMin));
+  }
+}
+
+/** Coerces an AppMessage sunrise/sunset value (minute-of-day) to an integer. */
+function messageMinute(raw: unknown): number {
+  const value = typeof raw === "number" ? raw : parseInt(String(raw), 10);
+  return isNaN(value) ? SUN_UNKNOWN : value;
 }
 
 /*

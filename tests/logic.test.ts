@@ -2,10 +2,16 @@ import { expect, test, describe } from "bun:test";
 import {
   Casita,
   expressionForHour,
-  formatTime,
-  formatSeconds,
+  expressionFillsTopCorners,
+  isSweatingTemp,
+  SWEATING_TEMP_TENTHS,
   normalizeTheme,
   themeToCode,
+  resolveTheme,
+  minutesOfDay,
+  SUN_UNKNOWN,
+  formatTime,
+  formatSeconds,
   DEFAULT_THEME,
   normalizeToggle,
   toggleToCode,
@@ -46,6 +52,36 @@ describe("expressionForHour", () => {
   test("night 21:00-05:59 -> Sleeping", () => {
     expect(expressionForHour(21)).toBe(Casita.Sleeping);
     expect(expressionForHour(23)).toBe(Casita.Sleeping);
+  });
+});
+
+describe("expressionFillsTopCorners", () => {
+  test("sleeping and disconnected fill the top corners", () => {
+    expect(expressionFillsTopCorners(Casita.Sleeping)).toBe(true);
+    expect(expressionFillsTopCorners(Casita.Disconnected)).toBe(true);
+  });
+
+  test("house expressions leave the roof corners empty", () => {
+    expect(expressionFillsTopCorners(Casita.Normal)).toBe(false);
+    expect(expressionFillsTopCorners(Casita.Happy)).toBe(false);
+    expect(expressionFillsTopCorners(Casita.Grinning)).toBe(false);
+    expect(expressionFillsTopCorners(Casita.Sweating)).toBe(false);
+  });
+});
+
+describe("isSweatingTemp", () => {
+  test("true at or above 30 °C", () => {
+    expect(isSweatingTemp(SWEATING_TEMP_TENTHS)).toBe(true); // exactly 30.0 °C
+    expect(isSweatingTemp(305)).toBe(true);
+    expect(isSweatingTemp(400)).toBe(true);
+  });
+  test("false below 30 °C", () => {
+    expect(isSweatingTemp(299)).toBe(false);
+    expect(isSweatingTemp(0)).toBe(false);
+    expect(isSweatingTemp(-50)).toBe(false);
+  });
+  test("unknown reading never sweats", () => {
+    expect(isSweatingTemp(WEATHER_UNKNOWN)).toBe(false);
   });
 });
 
@@ -99,27 +135,62 @@ describe("normalizeTheme", () => {
   test("passes through valid strings", () => {
     expect(normalizeTheme("light")).toBe("light");
     expect(normalizeTheme("dark")).toBe("dark");
+    expect(normalizeTheme("auto")).toBe("auto");
   });
   test("maps app-message codes (number)", () => {
     expect(normalizeTheme(0)).toBe("light");
     expect(normalizeTheme(1)).toBe("dark");
+    expect(normalizeTheme(2)).toBe("auto");
   });
   test("maps app-message codes (string)", () => {
     expect(normalizeTheme("0")).toBe("light");
     expect(normalizeTheme("1")).toBe("dark");
+    expect(normalizeTheme("2")).toBe("auto");
   });
   test("falls back to default for junk/undefined", () => {
     expect(normalizeTheme(undefined)).toBe(DEFAULT_THEME);
     expect(normalizeTheme(null)).toBe(DEFAULT_THEME);
     expect(normalizeTheme("purple")).toBe(DEFAULT_THEME);
-    expect(normalizeTheme(2)).toBe(DEFAULT_THEME);
+    expect(normalizeTheme(3)).toBe(DEFAULT_THEME);
   });
 });
 
 describe("themeToCode", () => {
-  test("light -> 0, dark -> 1", () => {
+  test("light -> 0, dark -> 1, auto -> 2", () => {
     expect(themeToCode("light")).toBe(0);
     expect(themeToCode("dark")).toBe(1);
+    expect(themeToCode("auto")).toBe(2);
+  });
+});
+
+describe("resolveTheme", () => {
+  const sunrise = 7 * 60; // 07:00
+  const sunset = 19 * 60; // 19:00
+
+  test("concrete themes pass through unchanged", () => {
+    expect(resolveTheme("light", 12 * 60, sunrise, sunset)).toBe("light");
+    expect(resolveTheme("dark", 12 * 60, sunrise, sunset)).toBe("dark");
+  });
+  test("auto is light between sunrise and sunset", () => {
+    expect(resolveTheme("auto", sunrise, sunrise, sunset)).toBe("light"); // exactly sunrise
+    expect(resolveTheme("auto", 12 * 60, sunrise, sunset)).toBe("light");
+  });
+  test("auto is dark before sunrise and at/after sunset", () => {
+    expect(resolveTheme("auto", sunrise - 1, sunrise, sunset)).toBe("dark");
+    expect(resolveTheme("auto", sunset, sunrise, sunset)).toBe("dark"); // exactly sunset
+    expect(resolveTheme("auto", 23 * 60, sunrise, sunset)).toBe("dark");
+  });
+  test("auto falls back to dark when sun times are unknown or invalid", () => {
+    expect(resolveTheme("auto", 12 * 60, SUN_UNKNOWN, SUN_UNKNOWN)).toBe("dark");
+    expect(resolveTheme("auto", 12 * 60, sunset, sunrise)).toBe("dark"); // reversed
+  });
+});
+
+describe("minutesOfDay", () => {
+  test("counts minutes since local midnight", () => {
+    expect(minutesOfDay(new Date(2020, 0, 1, 0, 0))).toBe(0);
+    expect(minutesOfDay(new Date(2020, 0, 1, 7, 30))).toBe(450);
+    expect(minutesOfDay(new Date(2020, 0, 1, 23, 59))).toBe(1439);
   });
 });
 

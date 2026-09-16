@@ -5,7 +5,7 @@
 
 import { render, timeFont, badgeFont, paletteFor, casitaImageFitting } from "gfx";
 import { CLOCK_MARGIN_BOTTOM, CASITA_MIN_TOP_GAP, SECONDS_GAP } from "constants";
-import { formatTime, formatSeconds } from "logic";
+import { formatTime, formatSeconds, minutesOfDay, resolveTheme } from "logic";
 import { settings } from "data/settings";
 import { currentCasitaId } from "draw/casita";
 import { drawBadges } from "draw/badges";
@@ -15,7 +15,9 @@ import { secondsVisible } from "wake";
 export function draw(): void {
   const now = new Date();
   const font = timeFont;
-  const palette = paletteFor(settings.theme);
+  const palette = paletteFor(
+    resolveTheme(settings.theme, minutesOfDay(now), settings.sunriseMin, settings.sunsetMin),
+  );
   const casitaId = currentCasitaId(now);
 
   // Respect the round display's safe area; on rectangular displays this is the
@@ -25,7 +27,7 @@ export function draw(): void {
   render.begin();
   render.fillRectangle(palette.background, 0, 0, render.width, render.height);
 
-  const band = drawBadges(area, palette, now);
+  const band = drawBadges(area, palette, now, casitaId);
 
   const timeText = formatTime(now, watch.hour12);
   const textWidth = render.getTextWidth(timeText, font);

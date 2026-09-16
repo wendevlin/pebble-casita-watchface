@@ -22,6 +22,7 @@ const html = eta.renderString(template, {
   themes: [
     { value: "light", label: "Light — white background" },
     { value: "dark", label: "Dark — black background" },
+    { value: "auto", label: "Auto — light by day, dark at night" },
   ],
   badges: [
     { name: "date", label: "Date" },

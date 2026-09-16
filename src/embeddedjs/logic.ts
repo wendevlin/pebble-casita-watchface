@@ -11,18 +11,29 @@ export enum Casita {
   Grinning = 3,
   Sleeping = 4,
   Disconnected = 5,
+  Sweating = 6,
 }
 
 // MDI badge icons, converted to PDC and declared after the Casita images in
 // package.json (so their resource IDs continue the same 1-based sequence).
 export enum Icon {
-  Thermometer = 6,
-  ShoePrint = 7,
-  CalendarBlank = 8,
-  BatteryLow = 9,
-  BatteryMedium = 10,
-  BatteryHigh = 11,
-  HomeThermometer = 12,
+  Thermometer = 7,
+  ShoePrint = 8,
+  CalendarBlank = 9,
+  BatteryLow = 10,
+  BatteryMedium = 11,
+  BatteryHigh = 12,
+  HomeThermometer = 13,
+}
+
+/**
+ * True for expressions whose art reaches into the top corners (the sleeping
+ * "Zzz" and the disconnected no-internet glyph). Their corners aren't empty
+ * like the normal house roof, so a wrapped badge row would overlap them and
+ * Casita must be shrunk below the full badge stack instead.
+ */
+export function expressionFillsTopCorners(id: Casita): boolean {
+  return id === Casita.Sleeping || id === Casita.Disconnected;
 }
 
 /**
@@ -37,6 +48,17 @@ export function expressionForHour(hour: number): Casita {
   if (hour >= 12 && hour < 15) return Casita.Happy;
   if (hour >= 15 && hour < 21) return Casita.Grinning;
   return Casita.Sleeping;
+}
+
+/** Weather temperature (tenths °C) at/above which Casita starts sweating. */
+export const SWEATING_TEMP_TENTHS = 300; // 30.0 °C
+
+/**
+ * True when a known weather reading is hot enough for the sweating expression.
+ * The WEATHER_UNKNOWN sentinel (no reading yet) never counts as hot.
+ */
+export function isSweatingTemp(weatherTenthsC: number): boolean {
+  return weatherTenthsC > WEATHER_UNKNOWN && weatherTenthsC >= SWEATING_TEMP_TENTHS;
 }
 
 function pad2(value: number): string {
@@ -68,29 +90,62 @@ export function formatSeconds(date: Date): string {
 // Theme (light/dark) setting
 // --------------------------------------------------------------------------- //
 
-export type Theme = "light" | "dark";
+export type Theme = "light" | "dark" | "auto";
+
+/** A theme actually rendered on screen — "auto" is resolved to one of these. */
+export type ResolvedTheme = "light" | "dark";
 
 // The watchface historically rendered on a black background, so "dark" is the
 // default to keep existing behaviour when no preference has been stored yet.
 export const DEFAULT_THEME: Theme = "dark";
 
+/** Sentinel for an unknown sunrise/sunset minute (phone hasn't supplied one). */
+export const SUN_UNKNOWN = -1;
+
 /**
  * Coerces a stored (string) or app-message (number) theme value into a valid
  * Theme, falling back to DEFAULT_THEME for anything unrecognised.
  *
- * Accepts: "light"/"dark", the numbers 0 (light) / 1 (dark), and their string
- * forms "0"/"1" (AppMessage integers can arrive as either).
+ * Accepts: "light"/"dark"/"auto", the numbers 0 (light) / 1 (dark) / 2 (auto),
+ * and their string forms "0"/"1"/"2" (AppMessage integers can arrive as either).
  */
 export function normalizeTheme(value: unknown): Theme {
-  if (value === "light" || value === "dark") return value;
+  if (value === "light" || value === "dark" || value === "auto") return value;
   if (value === 0 || value === "0") return "light";
   if (value === 1 || value === "1") return "dark";
+  if (value === 2 || value === "2") return "auto";
   return DEFAULT_THEME;
 }
 
-/** Encodes a theme as the integer sent over AppMessage (0 = light, 1 = dark). */
+/**
+ * Encodes a theme as the integer sent over AppMessage (0 = light, 1 = dark,
+ * 2 = auto).
+ */
 export function themeToCode(theme: Theme): number {
+  if (theme === "auto") return 2;
   return theme === "dark" ? 1 : 0;
+}
+
+/** Local-clock minutes since midnight (0-1439) for a Date. */
+export function minutesOfDay(date: Date): number {
+  return date.getHours() * 60 + date.getMinutes();
+}
+
+/**
+ * Resolves the theme actually rendered. Concrete themes pass through; "auto"
+ * picks light between sunrise and sunset and dark otherwise, using minutes since
+ * local midnight. When the phone hasn't supplied valid sun times yet (unknown,
+ * or a nonsensical range) it falls back to dark so the face still renders.
+ */
+export function resolveTheme(
+  theme: Theme,
+  nowMinutes: number,
+  sunriseMin: number,
+  sunsetMin: number,
+): ResolvedTheme {
+  if (theme !== "auto") return theme;
+  if (sunriseMin < 0 || sunsetMin < 0 || sunriseMin >= sunsetMin) return "dark";
+  return nowMinutes >= sunriseMin && nowMinutes < sunsetMin ? "light" : "dark";
 }
 
 // --------------------------------------------------------------------------- //

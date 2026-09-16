@@ -11,7 +11,7 @@
 
 import Poco from "commodetto/Poco";
 import { ICON_SIZE } from "constants";
-import { Casita, Icon, Theme } from "logic";
+import { Casita, Icon, ResolvedTheme } from "logic";
 
 export type DCImage = InstanceType<typeof Poco.PebbleDrawCommandImage>;
 
@@ -59,13 +59,23 @@ export function casitaImageFitting(id: Casita, maxHeight: number): SizedImage {
     return { image: full, width: full.width, height: full.height };
   }
   const h = maxHeight | 0;
+  const scale = maxHeight / full.height;
   if (!scaledCasita || scaledCasita.id !== id || scaledCasita.height !== h) {
     // clone() yields a scalable draw-command list; the runtime image isn't.
     const clone = full.clone();
-    clone.scale(maxHeight / full.height);
+    clone.scale(scale);
+    // scale() only transforms point coordinates, so stroke widths keep their
+    // authored size and look disproportionately thick once shrunk. Scale each
+    // command's stroke to match (keeping any visible stroke at least 1px).
+    clone.process((command) => {
+      const w = command.strokeWidth;
+      if (w > 0) {
+        const scaled = (w * scale) | 0;
+        command.strokeWidth = scaled < 1 ? 1 : scaled;
+      }
+    });
     scaledCasita = { id, height: h, image: clone };
   }
-  const scale = maxHeight / full.height;
   return { image: scaledCasita.image, width: (full.width * scale) | 0, height: h };
 }
 
@@ -126,6 +136,6 @@ const DARK: Palette = {
   pillText: WHITE,
 };
 
-export function paletteFor(theme: Theme): Palette {
+export function paletteFor(theme: ResolvedTheme): Palette {
   return theme === "dark" ? DARK : LIGHT;
 }

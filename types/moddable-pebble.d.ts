@@ -15,6 +15,14 @@ declare module "commodetto/Poco" {
     new (family: string, size: number): Font;
   }
 
+  export interface DrawCommand {
+    readonly type: number;
+    strokeWidth: number;
+    stroke: number;
+    fill: number;
+    hidden: boolean;
+  }
+
   export class PebbleDrawCommandImage {
     constructor(id: number | string);
     readonly width: number;
@@ -22,6 +30,7 @@ declare module "commodetto/Poco" {
     clone(): PebbleDrawCommandImage;
     scale(x: number, y: number): this;
     scale(scale: number): this;
+    process(callback: (command: DrawCommand) => void): this;
   }
 
   export interface Poco {
