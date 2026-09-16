@@ -9,7 +9,7 @@ jobs:
     name: Build & Publish to Pebble Appstore
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: oven-sh/setup-bun@v2
 
@@ -50,4 +50,4 @@ jobs:
       - name: Attach .pbw to GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" build/casita-watchface.pbw
+        run: gh release upload "${{ github.event.release.tag_name }}" build/*.pbw
