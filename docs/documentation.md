@@ -56,12 +56,13 @@ Pebble/Rebble phone app ("Settings"). Options:
   **Dark**.
 - **Badges — Date / Temperature / Steps / Battery / Home temperature:**
   individually show or hide the top badges (all default to **on**), and reorder
-  them with the ▲ ▼ buttons to set their left-to-right order. The **Home
-  temperature** badge only appears once Home Assistant is connected and a sensor
-  is chosen (see below). When more badges are enabled than fit on one
-  line they wrap onto a second line that sits in the empty space beside Casita's
-  roof, so Casita keeps its full size. A second row of exactly two badges is
-  split to the left and right corners so the roof peak sits clear between them.
+  them with the ▲ ▼ buttons to set their priority. The first badge sits in the
+  top-right corner and the others fill leftwards from it; the top row takes
+  three, and any further badges drop to a second row pinned to the two corners,
+  leaving the middle free for Casita's roof peak so Casita keeps its full size.
+  On the round Pebble the rows hold one, two and two badges: one centred at
+  the top, two centred below it, the rest at the circle's edge beside the roof. The **Home temperature** badge only appears once
+  Home Assistant is connected and a sensor is chosen (see below).
 
 How it works:
 
@@ -77,8 +78,10 @@ How it works:
 - On save, the phone persists the choices (`localStorage`) and sends them to the
   watch over AppMessage: `THEME` (0 = light, 1 = dark), `SHOW_WEATHER`,
   `SHOW_STEPS`, `SHOW_DATE` and `SHOW_BATTERY` (0 = off, 1 = on),
-  and `BADGE_ORDER` (the left-to-right badge order as a compact code string,
-  e.g. `dwsb` = date, weather, steps, battery).
+  and `BADGE_ORDER` (the badge priority order as a compact code string,
+  e.g. `dwsb` = date, weather, steps, battery). The one message in the other
+  direction is `REFRESH`, which the watch sends to ask for fresh data (see
+  [Refresh cadence](#refresh-cadence)).
 - The watch persists every preference in its own `localStorage`, so it renders
   with the right colors and badges immediately on launch, before the phone
   reconnects.
@@ -148,31 +151,73 @@ How it works (all phone-side):
   clears the connection accordingly. A completed login is kept as a connected
   draft (tokens persisted) until it is saved or explicitly disconnected.
 - The OAuth URL building, state encoding, token bodies, the sensor template,
-  sensor-list parsing/search, and the WebSocket message/parse helpers are pure
-  functions in `src/pkjs/ha.ts` (unit-tested in `tests/ha.test.ts`). The config
+  sensor-list parsing/search and the state→°C conversion are pure functions in
+  `src/pkjs/ha.ts` (unit-tested in `tests/ha.test.ts`). The config
   webview re-implements the tiny base64url/state and search bits inline because
   it runs in its own sandbox and cannot import that module.
-- **Live home temperature:** once connected with a sensor selected, pkjs keeps a
-  live feed of that sensor. It opens a WebSocket to `<ha-url>/api/websocket`,
-  authenticates with the access token, and `subscribe_entities` to the chosen
-  entity so each new reading is pushed to the watch as `HA_TEMP` (tenths of a
-  degree Celsius, converted from °F when the sensor reports Fahrenheit). If the
-  runtime has no `WebSocket`, it falls back to polling `<ha-url>/api/states/<id>`
-  every 60 s. The feed is (re)started on launch and whenever the committed
-  connection/sensor changes, and stopped on disconnect. Expired tokens are
-  refreshed and the socket reconnects automatically.
+- **Home temperature reading:** once connected with a sensor selected, pkjs
+  reads `<ha-url>/api/states/<id>` on every refresh (see
+  [Refresh cadence](#refresh-cadence)) and sends the value to the watch as
+  `HA_TEMP` (tenths of a degree Celsius, converted from °F when the sensor
+  reports Fahrenheit). A token about to expire is refreshed first; a `401` on the
+  request triggers one refresh-and-retry. An earlier live WebSocket feed was
+  dropped: every pushed reading is an AppMessage that wakes the watch, and a
+  room temperature does not need that.
+
+## Refresh cadence
+
+Weather, sun times and the Home Assistant reading all refresh together, every
+**30 minutes**, and the **watch** drives it. PebbleKit JS runs inside the Pebble
+mobile app, and its timers stall whenever the phone freezes that app in the
+background — so a phone-side `setInterval` alone leaves a stale value on the
+watch for hours (the symptom: a morning temperature that never changes). An
+inbound AppMessage does wake the JS, so:
+
+- `main.ts` sends `REFRESH` from its minute tick whenever the minute of the
+  hour is a multiple of 30, and once more whenever the phone link comes back
+  (after a night in airplane mode, say). The send is skipped while disconnected
+  and any outbox error is ignored — the next interval retries.
+- `index.ts` handles that message by calling `refreshAll()`: the Open-Meteo
+  fetch (weather + sunrise/sunset) and the HA sensor GET. The same function runs
+  once on launch and on Save. There is deliberately no phone-side timer: it
+  would stall in the background anyway, and while the app is awake it would only
+  double the traffic against the watch's own cadence.
+- **Phone → watch pushes are serialised.** The watch runtime keeps only the
+  newest *unread* inbound message, so two pushes sent back to back can silently
+  drop the first (observed in the emulator: weather lost behind the sun times).
+  All pushes therefore go through a small queue in `index.ts` that waits for the
+  previous message's ack before sending the next, and weather + sun times travel
+  in one message — which also wakes the watch once instead of twice.
 
 ## Badges
 
-Badges render right-aligned across the top of the face, wrapping onto a second
-line when they don't all fit. Only one line's worth of vertical space is
-reserved, so Casita keeps its full size: because it's a little house, its
-triangular roof leaves the top corners empty and the wrapped line sits in that
-space beside the roof peak rather than pushing Casita down. When the wrapped
-line holds exactly two badges they are split to the left and right corners so
-Casita's central roof peak fits in the gap between them instead of being
-overlapped. Their left-to-right order is configurable from the settings page
-(default: date, temperature, steps, battery). Each is a rounded pill with an
+Badges render along the top of the face in the priority order set on the
+settings page (default: date, temperature, steps, battery, home). Every row is
+filled **from right to left**: the first badge is the rightmost of the top row,
+the next sits to its left, and so on, so the top-priority badge stays put no
+matter how many others are enabled. The row planning is the pure, unit-tested
+`layoutBadges()` in `logic.ts`:
+
+- **Rectangular (Pebble Time 2):** the first row hugs the right edge and takes
+  the first **three** badges (a wide trio may run past the left edge; accepted).
+  Badges four and five go on a second row pinned to the **corners** — four in
+  the bottom-right, five in the bottom-left — so the middle of that row stays
+  clear. Only one row's worth of vertical space is reserved, so Casita keeps its
+  full size: because it's a little house, its triangular roof leaves the top
+  corners empty, the corner badges sit in that space and the roof peak rises
+  between them. (The sleeping and disconnected expressions fill those corners,
+  so they reserve the full stack and shrink Casita instead.)
+- **Round (Pebble Round 2):** the circle is narrow at the top and wide just
+  below, so the stack is **1 + 2 + 2**. The first badge sits alone, centred, in
+  the narrow top row; badges two and three form a centred pair on the second row
+  (badge 2 on the right); badges four and five go on a third row pinned to the
+  circle's edge at that height — four on the right, five on the left — with the
+  middle clear. The first two rows are reserved, so Casita sits below them; the
+  third row overlays the roof corners just like the rectangular second row
+  (the roof rises at 45°, so at the bottom of that row it is about 40 px wide,
+  leaving room for even the widest temperature pill on each side).
+
+Each badge is a rounded pill with an
 [MDI](https://pictogrammers.com/library/mdi/) icon and a value:
 
 | Badge       | Icon (MDI)       | Source                              | Format                                        |
@@ -184,9 +229,11 @@ overlapped. Their left-to-right order is configurable from the settings page
 | Home temp   | `home-thermometer` | A Home Assistant sensor (phone)   | One decimal, no unit letter, e.g. `21,3°`      |
 
 - **Weather** is fetched by `src/pkjs/index.ts` using the phone's location and
-  the keyless [Open-Meteo](https://open-meteo.com/) API (on launch, every 30
-  minutes, and whenever settings are saved). The temperature is sent to the
-  watch in tenths of a degree Celsius via the `WEATHER_TEMP` key.
+  the keyless [Open-Meteo](https://open-meteo.com/) API on every refresh (see
+  [Refresh cadence](#refresh-cadence)). The temperature is sent to the watch in
+  tenths of a degree Celsius via the `WEATHER_TEMP` key. The last successful
+  position is remembered, so when the phone refuses a fresh fix in the
+  background the weather is still updated for the last known place.
 - **Units (°C/°F)** are decided on the watch from `Health.displayMeasurementSystem`,
   which mirrors the Pebble app's *units* setting (imperial → °F, otherwise °C).
   The value is converted accordingly; the unit letter itself is not shown (the
@@ -199,13 +246,16 @@ overlapped. Their left-to-right order is configurable from the settings page
   `battery_state_service_peek()` — see [Native FFI bridge](#native-ffi-bridge));
   shown as a whole percent, hidden if FFI is unavailable. Its icon is colour-coded by level: green at ≥ 70%, orange at
   ≥ 30%, red below 30% (three pre-tinted PDC variants generated from the one
-  `battery.svg`).
+  `battery.svg`). The tints are the fully saturated palette entries
+  `GColorGreen` (`#00ff00`), `GColorChromeYellow` (`#ff9800` → 255,170,0) and
+  `GColorRed` (`#ff0000`): the converter truncates to 2 bits per channel, and the
+  muted Material green that resulted from `#4caf50` (85,170,85) read as grey on
+  the real Pebble Time 2 display even though it looks green in the emulator.
 - **Date** shows the current day of month, read from the watch clock and
   refreshed every minute.
-- **Home temperature** shows a Home Assistant sensor's reading, streamed live to
-  the watch by the phone over the Home Assistant WebSocket API (see the Home
-  Assistant section above) and sent in tenths of a degree Celsius via the
-  `HA_TEMP` key. Like the weather badge it is displayed in °C/°F per the watch's
+- **Home temperature** shows a Home Assistant sensor's reading, fetched by the
+  phone on every refresh (see the Home Assistant section above) and sent in
+  tenths of a degree Celsius via the `HA_TEMP` key. Like the weather badge it is displayed in °C/°F per the watch's
   own units setting, with the same text colour as the other badges, but its
   **icon** is a distinct **deep-orange** (baked into the PDC) so it reads apart
   from the blue Open-Meteo thermometer. The badge only appears when Home
@@ -276,7 +326,7 @@ async C→JS event, so the value is simply read during the once-a-minute frame.
 │   │   │   └── settings.ts # Persisted preferences + health/weather reads
 │   │   ├── draw/
 │   │   │   ├── casita.ts   # Casita expression selection
-│   │   │   ├── badges.ts   # Right-aligned badge rows (date/weather/steps/battery)
+│   │   │   ├── badges.ts   # Badge rows (date/weather/steps/battery/home)
 │   │   │   └── face.ts     # Full-frame composition
 │   │   ├── hw.ts           # FFI accessor (battery level)
 │   │   ├── ffi.d.ts        # Types for the firmware-preloaded `ffi` module
@@ -293,16 +343,19 @@ async C→JS event, so the value is simply read during the once-a-minute frame.
 ├── tests/resources.test.ts # `bun test` guard: enum IDs match package.json media order
 ├── tests/ha.test.ts        # `bun test` unit tests for pkjs/ha.ts
 ├── tools/svg2pdc.py        # Self-contained SVG -> PDC converter
-├── tools/render-config.mjs # Renders config.eta -> config-html.ts at build time
-├── tools/render-resources.mjs # Derives resource-ids.ts from package.json media order
+├── tools/build-pdc.ts      # Job table: which SVGs become which .pdc, in which tint
+├── tools/render-config.ts  # Renders config.eta -> config-html.ts at build time
+├── tools/render-resources.ts # Derives resource-ids.ts from package.json media order
 ├── types/moddable-pebble.d.ts  # Local typings for standalone typecheck
+├── tsconfig.tools.json     # Typecheck config for the Bun build tools
 ├── package.json            # Project + Pebble manifest + scripts
 ├── mise.toml               # Toolchain pinning
 └── tsconfig.json           # Standalone typecheck config
 ```
 
 `src/embeddedjs/main.ts` is intentionally tiny — it only wires runtime events
-(AppMessage, minute change, connection change) to a redraw. Rendering is split
+(AppMessage, minute change, connection change) to a redraw and sends the
+30-minute `REFRESH` request. Rendering is split
 across `draw/` (Casita, badges, frame composition), shared graphics primitives
 live in `gfx.ts`, persisted preferences and health/weather reads in
 `data/settings.ts`, and all the branch-y "which face / what string" logic lives
@@ -338,7 +391,7 @@ All scripts run through Bun (`bun run <name>`):
 
 | Script              | What it does                                                        |
 | ------------------- | ------------------------------------------------------------------- |
-| `resources`         | `render-resources` + regenerate `resources/**/*.pdc` from the SVGs.  |
+| `resources`         | `render-resources` + regenerate `resources/**/*.pdc` from the SVGs via the job table in `tools/build-pdc.ts`. |
 | `typecheck`         | `tsc --noEmit` for the watch code (`tsconfig.json`) **and** the phone code (`tsconfig.pkjs.json`). |
 | `test`              | `render-resources` + `bun test` — unit tests for `logic.ts` / `ha.ts` and the resource-ID guard. |
 | `render-config`     | Render `src/pkjs/config.eta` (Eta) → `src/pkjs/config-html.ts`.      |
@@ -370,19 +423,22 @@ bun run build
   such as the sleeping "Z" and the no-internet Wi-Fi glyph) becomes the
   `--body-color` (default Home Assistant blue `#18bcf2`).
 
-Because the body color is baked into each PDC, the `resources` script runs the
-converter multiple times so each expression gets the right color, then converts
-the badge icons:
+Because the body color is baked into each PDC, the converter runs once per
+tint. Which SVGs are converted with which options is a small table in
+`tools/build-pdc.ts` (run by `bun run resources`), one job per line:
 
-- Normal / Happy / Grinning / Sweating → blue `#18bcf2` (default)
-- Disconnected → `--body-color '#f7931e'` (orange)
-- Sleeping → `--body-color '#999999'` (gray)
+- Normal / Happy / Grinning / Sweating → blue `#18bcf2`
+- Disconnected → orange `#f7931e`
+- Sleeping → gray `#999999`
 - Badge icons (`mdi-svgs/*.svg`) → `resources/icons/*.pdc` (accent fill baked in)
+- Battery → the one `battery.svg` three times: `#ff0000` (low), `#ff9800`
+  (medium), `#00ff00` (high) — saturated palette entries on purpose, see the
+  Battery badge note above.
 
 The faces and badge icons are declared as `raw` media in `package.json`;
 `pebble build` assigns them numeric resource IDs in declaration order (1-based).
 The watch-side `Casita` and `Icon` enums are **generated** from that order by
-`tools/render-resources.mjs` into `src/embeddedjs/resource-ids.ts` (re-exported
+`tools/render-resources.ts` into `src/embeddedjs/resource-ids.ts` (re-exported
 from `logic.ts`), and `gfx.ts` draws them with `new Poco.PebbleDrawCommandImage(id)`
 + `render.drawDCI(...)` (icons are `clone()`d and `scale()`d down to badge size).
 A wrong id throws a fatal `not found` on the watch, so the ids are never edited by
@@ -390,9 +446,9 @@ hand; `tests/resources.test.ts` cross-checks the generated enums against
 `package.json`. Keep the PNG `APP_ICON` **after** all PDC entries — putting it
 first shifted every id and crashed the v1.0.0 store build on fresh installs.
 
-To add or swap a face, edit the `resources` script's SVG list, the `package.json`
-media array and the name table in `tools/render-resources.mjs`, then
-`bun run resources && bun run build`.
+To add or swap a face, edit the job table in `tools/build-pdc.ts`, the
+`package.json` media array and the name table in `tools/render-resources.ts`,
+then `bun run resources && bun run build`.
 
 ## Running in the emulator
 

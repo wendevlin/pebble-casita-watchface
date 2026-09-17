@@ -6,7 +6,7 @@ import pkg from "../package.json";
 /*
  * `pebble build` assigns resource IDs by position in package.json
  * `pebble.resources.media` (1-based). The Casita / Icon enums are generated from
- * that list by tools/render-resources.mjs and loaded on the watch with
+ * that list by tools/render-resources.ts and loaded on the watch with
  * `new Poco.PebbleDrawCommandImage(id)`, which throws a fatal "not found" when
  * the ID does not resolve to a PDC. This test checks the generated enums against
  * package.json independently, so a stale or broken generation (or a PNG landing

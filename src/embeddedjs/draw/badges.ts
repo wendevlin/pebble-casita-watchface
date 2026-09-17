@@ -1,9 +1,9 @@
 /*
- * The Home Assistant–style badge row: a right-aligned strip of pills along the
- * top of the face, each showing a small icon + short text (date, weather, steps).
+ * The Home Assistant–style badge rows: pills along the top of the face, each
+ * showing a small icon + short text (date, weather, steps, battery, home).
  */
 
-import { render, badgeFont, iconImage, DCImage, Palette } from "gfx";
+import { render, badgeFont, iconImage, isRound, DCImage, Palette } from "gfx";
 import {
   ICON_SIZE,
   PILL_PAD_X,
@@ -25,6 +25,7 @@ import {
   formatTemperature,
   tempUnitForSystem,
   expressionFillsTopCorners,
+  layoutBadges,
   WEATHER_UNKNOWN,
 } from "logic";
 import { settings, readBattery, readSteps, measurementSystem } from "data/settings";
@@ -41,7 +42,7 @@ interface Badge {
   text: string;
 }
 
-/** Builds the visible badges (left→right) from settings + live data. */
+/** Builds the visible badges, in priority order, from settings + live data. */
 function buildBadges(now: Date): Badge[] {
   const badges: Badge[] = [];
   for (const id of settings.badgeOrder) {
@@ -91,96 +92,53 @@ function pillWidth(badge: Badge): number {
   return PILL_PAD_X + ICON_SIZE + ICON_GAP + render.getTextWidth(badge.text, badgeFont) + PILL_PAD_X;
 }
 
-/** Total drawn width of badges [start, end): pill widths plus inter-pill gaps. */
-function lineWidth(widths: number[], start: number, end: number): number {
-  let total = 0;
-  for (let i = start; i < end; i++) {
-    total += widths[i] + (i > start ? BADGE_GAP : 0);
-  }
-  return total;
-}
-
 /**
- * Draws the badge row(s) right-aligned along the top of `area` and returns the
- * vertical band height the caller should reserve for Casita (0 when no badges
- * are visible).
+ * Draws the badge rows along the top of `area` and returns the vertical band
+ * height the caller should reserve for Casita (0 when no badges are visible).
  *
- * Badges are laid out left→right on a single right-aligned line when they fit.
- * When they don't, they split into exactly two balanced rows (the first row
- * keeps the extra badge when the count is odd, so 5 badges become 3 + 2) rather
- * than greedily wrapping into three-plus rows. A too-wide first row is allowed
- * to overflow the left edge instead of spilling onto another line. When the
- * second row holds exactly two badges they are split to the left and right
- * corners (rather than kept together) so Casita's central roof peak fits in the
- * gap between them instead of being overlapped.
+ * Row planning is the pure `layoutBadges` in logic.ts (unit-tested): every row
+ * fills from right to left in the user's priority order. On rectangular
+ * displays the first row hugs the right edge and takes up to three badges; the
+ * rest go to a second row pinned to the two corners. On round displays the
+ * stack is 1 + 2 + 2: one badge centred in the narrow top row, two centred
+ * below it, and the rest on a third row pinned to the circle's edge.
  *
- * Only a SINGLE line's height is reserved even when the badges wrap: Casita is a
- * little house, so its triangular roof leaves empty space in the top corners.
- * The wrapped line(s) are right-aligned into that negative space beside the roof
- * peak, so they don't need to push Casita down or shrink it — returning just one
- * line keeps Casita full-size regardless of how many badge rows are shown.
- *
- * The exception is expressions whose art fills the top corners (the sleeping
- * "Zzz" and the disconnected no-internet glyph): there the corners aren't empty,
- * so when the badges wrap the full badge-stack height is reserved instead,
- * shrinking Casita below the rows so nothing overlaps.
+ * Only the stacked rows' height is reserved (one on rect, two on round):
+ * Casita is a little house, so its triangular roof leaves empty space in the
+ * top corners and the corner-pinned last row sits in that space, with the roof
+ * peak rising between the two badges, rather than pushing Casita down or
+ * shrinking it. The exceptions reserve the full stack height
+ * instead, shrinking Casita below the rows so nothing overlaps: expressions
+ * whose art fills the top corners (the sleeping "Zzz" and the disconnected
+ * no-internet glyph).
  */
 export function drawBadges(area: Rect, palette: Palette, now: Date, casitaId: Casita): number {
   const badges = buildBadges(now);
   if (badges.length === 0) return 0;
 
   const widths = badges.map(pillWidth);
-  const avail = area.width - MARGIN * 2;
-
-  // Lay the badges out on a single right-aligned row when they fit. When they
-  // don't, split them into exactly two balanced rows (the first row keeps the
-  // extra badge when the count is odd, e.g. 5 -> 3 + 2) instead of greedily
-  // wrapping. Greedy width-packing let one wide badge (a 4-char step count like
-  // "0,5K") bump a trailing badge onto a third line, giving an unwanted 2/2/1
-  // split; a fixed split keeps it at 3/2. The first row may then be wider than
-  // the available width and overflow the left edge — that is accepted.
-  const lines: { start: number; end: number; total: number }[] = [];
-  const singleTotal = lineWidth(widths, 0, badges.length);
-  if (singleTotal <= avail || badges.length < 2) {
-    lines.push({ start: 0, end: badges.length, total: singleTotal });
-  } else {
-    const split = (badges.length + 1) >> 1; // ceil(n / 2): first row gets the extra
-    lines.push({ start: 0, end: split, total: lineWidth(widths, 0, split) });
-    lines.push({ start: split, end: badges.length, total: lineWidth(widths, split, badges.length) });
-  }
+  const layout = layoutBadges(widths, {
+    areaWidth: area.width,
+    round: isRound,
+    margin: MARGIN,
+    gap: BADGE_GAP,
+    pillHeight: PILL_H,
+  });
 
   const font = badgeFont;
-  let y = area.y + MARGIN;
-  for (let li = 0; li < lines.length; li++) {
-    const line = lines[li];
+  for (const p of layout.placements) {
+    const y = area.y + MARGIN + p.row * (PILL_H + BADGE_GAP);
     const iconY = y + ((PILL_H - ICON_SIZE) >> 1);
     const textY = y + ((PILL_H - font.height) >> 1) - BADGE_TEXT_NUDGE;
-    if (li > 0 && line.end - line.start === 2) {
-      // A wrapped (second) row with exactly two badges straddles Casita's
-      // central roof peak: pin one badge to the left corner and the other to
-      // the right corner so neither sits over the peak in the middle.
-      drawPill(area.x + MARGIN, y, widths[line.start], badges[line.start], palette, iconY, textY);
-      const rightW = widths[line.end - 1];
-      const rightX = area.x + area.width - MARGIN - rightW;
-      drawPill(rightX, y, rightW, badges[line.end - 1], palette, iconY, textY);
-    } else {
-      let x = area.x + area.width - MARGIN - line.total;
-      for (let i = line.start; i < line.end; i++) {
-        drawPill(x, y, widths[i], badges[i], palette, iconY, textY);
-        x += widths[i] + BADGE_GAP;
-      }
-    }
-    y += PILL_H + BADGE_GAP;
+    drawPill(area.x + p.x, y, widths[p.index], badges[p.index], palette, iconY, textY);
   }
 
-  // Reserve only one line so wrapped rows overlay the empty roof corners rather
-  // than compressing Casita (see the note above). Expressions that fill the top
-  // corners have no empty space there, so once the badges wrap reserve the full
-  // stack height, shrinking Casita below the rows instead of letting them overlap.
-  if (lines.length > 1 && expressionFillsTopCorners(casitaId)) {
-    return MARGIN * 2 + lines.length * PILL_H + (lines.length - 1) * BADGE_GAP;
-  }
-  return MARGIN * 2 + PILL_H;
+  // Rows that push Casita down: the first on rect, the first two on round. Any
+  // further row is corner-pinned and overlays the empty space beside the roof
+  // peak — unless the expression fills those corners, then reserve everything.
+  const stacked = isRound ? 2 : 1;
+  const reserved = expressionFillsTopCorners(casitaId) || layout.rows < stacked ? layout.rows : stacked;
+  return MARGIN * 2 + reserved * PILL_H + (reserved - 1) * BADGE_GAP;
 }
 
 function drawPill(

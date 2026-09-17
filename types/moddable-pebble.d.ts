@@ -70,7 +70,9 @@ interface Console {
 }
 declare const console: Console;
 
-declare const screen: unknown;
+// The host display object (pebble/display PebbleDisplay). Only the shape flag
+// is read directly; everything else goes through Poco.
+declare const screen: { readonly round: boolean };
 
 interface TimeChangeEvent {
   date: Date;

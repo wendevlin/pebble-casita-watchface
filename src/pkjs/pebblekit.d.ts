@@ -11,8 +11,17 @@ declare namespace Pebble {
     response?: string;
   }
 
+  /** Inbound AppMessage from the watch; keys are the names from `messageKeys`. */
+  interface AppMessageEvent {
+    payload: { [key: string]: unknown };
+  }
+
   function addEventListener(type: "ready", callback: () => void): void;
   function addEventListener(type: "showConfiguration", callback: () => void): void;
+  function addEventListener(
+    type: "appmessage",
+    callback: (event: AppMessageEvent) => void,
+  ): void;
   function addEventListener(
     type: "webviewclosed",
     callback: (event: WebviewClosedEvent) => void,

@@ -22,7 +22,6 @@
       "draw/casita": ["./src/embeddedjs/draw/casita"],
       "draw/badges": ["./src/embeddedjs/draw/badges"],
       "draw/face": ["./src/embeddedjs/draw/face"],
-      "wake": ["./src/embeddedjs/wake"],
       "hw": ["./src/embeddedjs/hw"],
       "ffi": ["./src/embeddedjs/ffi"]
     }

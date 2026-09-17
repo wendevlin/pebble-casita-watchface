@@ -22,21 +22,19 @@ import {
   HA_REDIRECT_URI,
   HA_SENSOR_TEMPLATE,
   decodeState,
-  tokenExchangeBody,
-  tokenRefreshBody,
-  templateRequestBody,
+  normalizeHaUrl,
   parseSensorList,
   sensorsFromStates,
-  normalizeHaUrl,
-  wsUrlFromHttp,
-  wsAuthMessage,
-  wsSubscribeEntitiesMessage,
-  parseWsStateUpdate,
   stateToTenthsC,
+  templateRequestBody,
+  tokenExchangeBody,
+  tokenRefreshBody,
   type HaSensor,
 } from "./ha";
 
-const WEATHER_REFRESH_MS = 30 * 60 * 1000;
+// How old a cached phone position may be before a fresh fix is requested;
+// matches the watch-driven 30-minute refresh cadence.
+const POSITION_MAX_AGE_MS = 30 * 60 * 1000;
 
 interface HaConfig {
   connected: boolean;
@@ -66,8 +64,20 @@ interface Config {
 // local copy so the phone bundle stays self-contained (it can't import the
 // watch modules).
 const BADGE_IDS = ["date", "weather", "steps", "battery", "home"];
-const BADGE_CODE: { [id: string]: string } = { date: "d", weather: "w", steps: "s", battery: "b", home: "h" };
-const BADGE_BY_CODE: { [code: string]: string } = { d: "date", w: "weather", s: "steps", b: "battery", h: "home" };
+const BADGE_CODE: { [id: string]: string } = {
+  date: "d",
+  weather: "w",
+  steps: "s",
+  battery: "b",
+  home: "h",
+};
+const BADGE_BY_CODE: { [code: string]: string } = {
+  d: "date",
+  w: "weather",
+  s: "steps",
+  b: "battery",
+  h: "home",
+};
 
 function normalizeBadgeOrder(value: string[] | string | null): string[] {
   let tokens: string[];
@@ -76,7 +86,9 @@ function normalizeBadgeOrder(value: string[] | string | null): string[] {
   } else if (typeof value === "string") {
     tokens = value.indexOf(",") >= 0 ? value.split(",") : value.split("");
   } else {
-    tokens = value.map(function (v) { return String(v); });
+    tokens = value.map(function (v) {
+      return String(v);
+    });
   }
   const order: string[] = [];
   for (let i = 0; i < tokens.length; i++) {
@@ -91,7 +103,11 @@ function normalizeBadgeOrder(value: string[] | string | null): string[] {
 }
 
 function badgeOrderToCode(order: string[]): string {
-  return order.map(function (id) { return BADGE_CODE[id]; }).join("");
+  return order
+    .map(function (id) {
+      return BADGE_CODE[id];
+    })
+    .join("");
 }
 
 function currentBadgeOrder(): string[] {
@@ -100,7 +116,9 @@ function currentBadgeOrder(): string[] {
 
 function currentTheme(): string {
   const stored = localStorage.getItem("theme");
-  return stored === "light" || stored === "dark" || stored === "auto" ? stored : "dark";
+  return stored === "light" || stored === "dark" || stored === "auto"
+    ? stored
+    : "auto";
 }
 
 // Mirror of logic.ts themeToCode: 0 = light, 1 = dark, 2 = auto.
@@ -224,7 +242,7 @@ function openConfig(initialView: string): void {
       boolPref("showBattery", true),
       currentBadgeOrder(),
       initialView,
-    )
+    ),
   );
 }
 
@@ -236,52 +254,84 @@ function homeBadgeActive(): boolean {
   );
 }
 
-function sendSettings(): void {
+// --- Outbound AppMessages: one at a time -----------------------------------
+// The watch runtime keeps only the NEWEST unread inbound message: a second push
+// that lands before the watch JS has read the first silently replaces it. So
+// pushes are queued here and each waits for the previous one's ack/nack (the
+// ack is sent by the watch after it has read the message). A safety timer
+// unsticks the queue if the phone app never calls either callback.
+
+interface Outbound {
+  label: string;
+  message: { [key: string]: number | string };
+}
+const outbox: Outbound[] = [];
+let outboxBusy = false;
+let outboxWatchdog: ReturnType<typeof setTimeout> | undefined;
+const OUTBOX_TIMEOUT_MS = 10000;
+
+function pumpOutbox(): void {
+  if (outboxBusy) return;
+  const next = outbox.shift();
+  if (!next) return;
+  outboxBusy = true;
+  const done = function () {
+    if (outboxWatchdog !== undefined) {
+      clearTimeout(outboxWatchdog);
+      outboxWatchdog = undefined;
+    }
+    outboxBusy = false;
+    pumpOutbox();
+  };
+  outboxWatchdog = setTimeout(function () {
+    console.log("Casita: no ack for " + next.label + ", continuing");
+    outboxWatchdog = undefined;
+    done();
+  }, OUTBOX_TIMEOUT_MS);
   Pebble.sendAppMessage(
-    {
-      THEME: themeCode(currentTheme()),
-      SHOW_WEATHER: boolPref("showWeather", true) ? 1 : 0,
-      SHOW_STEPS: boolPref("showSteps", true) ? 1 : 0,
-      SHOW_DATE: boolPref("showDate", true) ? 1 : 0,
-      SHOW_BATTERY: boolPref("showBattery", true) ? 1 : 0,
-      BADGE_ORDER: badgeOrderToCode(currentBadgeOrder()),
-      SHOW_HOME_TEMP: homeBadgeActive() ? 1 : 0,
-    },
-    function () {},
+    next.message,
+    done,
     function (e) {
-      console.log("Casita: failed to send settings: " + JSON.stringify(e));
+      console.log("Casita: failed to send " + next.label + ": " + JSON.stringify(e));
+      done();
     }
   );
+}
+
+function queueAppMessage(label: string, message: { [key: string]: number | string }): void {
+  outbox.push({ label: label, message: message });
+  pumpOutbox();
+}
+
+function sendSettings(): void {
+  queueAppMessage("settings", {
+    THEME: themeCode(currentTheme()),
+    SHOW_WEATHER: boolPref("showWeather", true) ? 1 : 0,
+    SHOW_STEPS: boolPref("showSteps", true) ? 1 : 0,
+    SHOW_DATE: boolPref("showDate", true) ? 1 : 0,
+    SHOW_BATTERY: boolPref("showBattery", true) ? 1 : 0,
+    BADGE_ORDER: badgeOrderToCode(currentBadgeOrder()),
+    SHOW_HOME_TEMP: homeBadgeActive() ? 1 : 0,
+  });
 }
 
 function sendHomeTemp(tenthsC: number): void {
-  Pebble.sendAppMessage(
-    { HA_TEMP: tenthsC },
-    function () {},
-    function (e) {
-      console.log("Casita: failed to send home temp: " + JSON.stringify(e));
-    }
-  );
+  queueAppMessage("home temp", { HA_TEMP: tenthsC });
 }
 
-function sendWeatherTemp(tenthsC: number): void {
-  Pebble.sendAppMessage(
-    { WEATHER_TEMP: tenthsC },
-    function () {},
-    function (e) {
-      console.log("Casita: failed to send weather: " + JSON.stringify(e));
-    }
-  );
-}
-
-function sendSunTimes(sunriseMin: number, sunsetMin: number): void {
-  Pebble.sendAppMessage(
-    { SUNRISE: sunriseMin, SUNSET: sunsetMin },
-    function () {},
-    function (e) {
-      console.log("Casita: failed to send sun times: " + JSON.stringify(e));
-    }
-  );
+/**
+ * Weather and sun times travel in ONE message: they come from the same
+ * Open-Meteo response, and one AppMessage wakes the watch once instead of
+ * twice. Either part may be absent (weather badge off / no sun times parsed).
+ */
+function sendWeather(tenthsC: number | null, sunriseMin: number, sunsetMin: number): void {
+  const message: { [key: string]: number } = {};
+  if (tenthsC !== null) message.WEATHER_TEMP = tenthsC;
+  if (sunriseMin >= 0 && sunsetMin >= 0) {
+    message.SUNRISE = sunriseMin;
+    message.SUNSET = sunsetMin;
+  }
+  if (Object.keys(message).length > 0) queueAppMessage("weather", message);
 }
 
 // Parses an Open-Meteo local ISO timestamp ("YYYY-MM-DDTHH:MM") into minutes
@@ -313,205 +363,152 @@ function fetchWeather(): void {
     function (pos) {
       const lat = pos.coords.latitude;
       const lon = pos.coords.longitude;
-      const url =
-        "https://api.open-meteo.com/v1/forecast?latitude=" + lat +
-        "&longitude=" + lon +
-        "&current=temperature_2m&daily=sunrise,sunset&timezone=auto&forecast_days=1";
-      const xhr = new XMLHttpRequest();
-      xhr.onload = function () {
-        try {
-          const data = JSON.parse(xhr.responseText);
-          if (wantWeather) {
-            const t = data && data.current && data.current.temperature_2m;
-            if (typeof t === "number") {
-              sendWeatherTemp(Math.round(t * 10));
-            } else {
-              console.log("Casita: no temperature in weather response");
-            }
-          }
-          const daily = data && data.daily;
-          const sunrise = isoLocalToMinutes(daily && daily.sunrise && daily.sunrise[0]);
-          const sunset = isoLocalToMinutes(daily && daily.sunset && daily.sunset[0]);
-          if (sunrise >= 0 && sunset >= 0) {
-            sendSunTimes(sunrise, sunset);
-          }
-        } catch (err) {
-          console.log("Casita: weather parse error: " + err);
-        }
-      };
-      xhr.onerror = function () {
-        console.log("Casita: weather request failed");
-      };
-      xhr.open("GET", url, true);
-      xhr.send();
+      // Remember the fix: in the background the phone often refuses a fresh
+      // position, and the last one is plenty accurate for weather.
+      localStorage.setItem("lastLat", String(lat));
+      localStorage.setItem("lastLon", String(lon));
+      fetchWeatherAt(lat, lon, wantWeather);
     },
     function (err) {
-      console.log("Casita: geolocation error: " + JSON.stringify(err));
+      const lat = parseFloat(localStorage.getItem("lastLat") || "");
+      const lon = parseFloat(localStorage.getItem("lastLon") || "");
+      if (isFinite(lat) && isFinite(lon)) {
+        console.log("Casita: geolocation failed, using last position: " + JSON.stringify(err));
+        fetchWeatherAt(lat, lon, wantWeather);
+      } else {
+        console.log("Casita: geolocation error: " + JSON.stringify(err));
+      }
     },
-    { timeout: 15000, maximumAge: WEATHER_REFRESH_MS }
+    { timeout: 15000, maximumAge: POSITION_MAX_AGE_MS }
   );
 }
 
-// --- Home Assistant live temperature (WebSocket) ---------------------------
-// Subscribes to the selected sensor over HA's WebSocket API and pushes each new
-// reading to the watch as HA_TEMP (tenths of a degree Celsius). If the runtime
-// has no WebSocket, it falls back to periodic REST polling. The feed is
-// (re)started whenever the committed connection/sensor changes and stopped on
-// disconnect or when the home badge is turned off.
+function fetchWeatherAt(lat: number, lon: number, wantWeather: boolean): void {
+  const url =
+    "https://api.open-meteo.com/v1/forecast?latitude=" + lat +
+    "&longitude=" + lon +
+    "&current=temperature_2m&daily=sunrise,sunset&timezone=auto&forecast_days=1";
+  const xhr = new XMLHttpRequest();
+  xhr.onload = function () {
+    try {
+      const data = JSON.parse(xhr.responseText);
+      let tenths: number | null = null;
+      if (wantWeather) {
+        const t = data && data.current && data.current.temperature_2m;
+        if (typeof t === "number") {
+          console.log("Casita: weather " + t + " °C");
+          tenths = Math.round(t * 10);
+        } else {
+          console.log(
+            "Casita: no temperature in weather response: " +
+              String(xhr.responseText).slice(0, 160),
+          );
+        }
+      }
+      const daily = data && data.daily;
+      const sunrise = isoLocalToMinutes(daily && daily.sunrise && daily.sunrise[0]);
+      const sunset = isoLocalToMinutes(daily && daily.sunset && daily.sunset[0]);
+      sendWeather(tenths, sunrise, sunset);
+    } catch (err) {
+      console.log("Casita: weather parse error: " + err);
+    }
+  };
+  xhr.onerror = function () {
+    console.log("Casita: weather request failed");
+  };
+  xhr.open("GET", url, true);
+  xhr.send();
+}
 
-const HA_WS_RECONNECT_MS = 15000;
-const HA_POLL_MS = 60000;
-let haWs: WebSocket | null = null;
-let haWsWantOpen = false;
-let haWsReconnectTimer: ReturnType<typeof setTimeout> | undefined;
-let haPollTimer: ReturnType<typeof setInterval> | undefined;
-let haWsEntity = "";
-let haWsUnit: string | null = null;
+// --- Home Assistant home temperature (periodic REST) ------------------------
+// The home badge is refreshed on the same 30-minute cadence as the weather:
+// one GET of the selected sensor's state, converted to tenths of a degree
+// Celsius and sent as HA_TEMP. A live WebSocket feed was dropped on purpose —
+// every pushed reading is an AppMessage that wakes the watch, and a room
+// temperature does not need that.
 
 function haCurrentEntity(): string {
   return localStorage.getItem("haSensorEntity") || "";
 }
 
-/** Convert a raw state/unit to tenths °C and forward it to the watch. */
-function pushHomeTemp(state: string | null, unit: string | null): void {
-  if (unit) haWsUnit = unit;
-  const tenths = stateToTenthsC(state, unit || haWsUnit);
-  if (tenths !== null) sendHomeTemp(tenths);
-}
-
-function stopHaLiveTemp(): void {
-  haWsWantOpen = false;
-  if (haWsReconnectTimer !== undefined) {
-    clearTimeout(haWsReconnectTimer);
-    haWsReconnectTimer = undefined;
-  }
-  if (haPollTimer !== undefined) {
-    clearInterval(haPollTimer);
-    haPollTimer = undefined;
-  }
-  if (haWs) {
-    try {
-      haWs.onopen = null;
-      haWs.onmessage = null;
-      haWs.onerror = null;
-      haWs.onclose = null;
-      haWs.close();
-    } catch (e) {
-      // ignore
-    }
-    haWs = null;
-  }
-}
-
-function scheduleHaWsReconnect(): void {
-  if (!haWsWantOpen || haWsReconnectTimer !== undefined) return;
-  haWsReconnectTimer = setTimeout(function () {
-    haWsReconnectTimer = undefined;
-    openHaWs();
-  }, HA_WS_RECONNECT_MS);
-}
-
-function openHaWs(): void {
+/** Fetch the selected HA sensor once and forward it to the watch. */
+function refreshHomeTemp(): void {
+  if (!homeBadgeActive()) return;
   const url = localStorage.getItem("haUrl") || "";
-  const token = localStorage.getItem("haAccessToken") || "";
   const entity = haCurrentEntity();
-  if (!url || !token || !entity) return;
-  haWsEntity = entity;
-  if (typeof WebSocket === "undefined") {
-    startHaPolling();
-    return;
-  }
-  let ws: WebSocket;
-  try {
-    ws = new WebSocket(wsUrlFromHttp(url));
-  } catch (e) {
-    console.log("Casita: HA ws open failed, polling instead: " + e);
-    startHaPolling();
-    return;
-  }
-  haWs = ws;
-  ws.onmessage = function (ev: MessageEvent) {
-    let msg: { type?: string };
-    try {
-      msg = JSON.parse(String(ev.data));
-    } catch (e) {
-      return;
-    }
-    if (msg.type === "auth_required") {
-      ws.send(wsAuthMessage(token));
-      return;
-    }
-    if (msg.type === "auth_invalid") {
-      // Token likely expired: refresh and let the reconnect pick up the new one.
-      console.log("Casita: HA ws auth invalid, refreshing token");
-      try {
-        ws.close();
-      } catch (e) {
-        // ignore
-      }
-      refreshHaToken(function () {
-        scheduleHaWsReconnect();
-      });
-      return;
-    }
-    if (msg.type === "auth_ok") {
-      ws.send(wsSubscribeEntitiesMessage(1, haWsEntity));
-      return;
-    }
-    const upd = parseWsStateUpdate(msg, haWsEntity);
-    if (upd) pushHomeTemp(upd.state, upd.unit);
-  };
-  ws.onerror = function () {
-    // onclose fires next and handles the reconnect.
-  };
-  ws.onclose = function () {
-    if (haWs === ws) haWs = null;
-    scheduleHaWsReconnect();
-  };
-}
+  if (!url || !entity) return;
 
-function startHaPolling(): void {
-  if (haPollTimer !== undefined) return;
-  const poll = function () {
-    const url = localStorage.getItem("haUrl") || "";
-    const token = localStorage.getItem("haAccessToken") || "";
-    const entity = haCurrentEntity();
-    if (!url || !token || !entity) return;
+  const request = function (token: string | null, retryOn401: boolean) {
+    if (!token) return;
     const xhr = new XMLHttpRequest();
     xhr.open("GET", url + "/api/states/" + encodeURIComponent(entity), true);
     xhr.setRequestHeader("Authorization", "Bearer " + token);
     xhr.onload = function () {
+      if (xhr.status === 401 && retryOn401) {
+        // Token expired between checks: refresh once and retry.
+        refreshHaToken(function (fresh) {
+          request(fresh, false);
+        });
+        return;
+      }
       try {
         const e = JSON.parse(xhr.responseText);
-        pushHomeTemp(
+        const tenths = stateToTenthsC(
           e && e.state != null ? String(e.state) : null,
           e && e.attributes ? e.attributes.unit_of_measurement || null : null,
         );
+        if (tenths !== null) {
+          console.log("Casita: home temperature " + tenths / 10 + " °C");
+          sendHomeTemp(tenths);
+        }
       } catch (err) {
-        // ignore
+        console.log("Casita: HA state parse error: " + err);
       }
+    };
+    xhr.onerror = function () {
+      console.log("Casita: HA state request failed");
     };
     xhr.send();
   };
-  poll();
-  haPollTimer = setInterval(poll, HA_POLL_MS);
-}
 
-/** (Re)start or stop the live temperature feed to match the committed config. */
-function syncHaLiveTemp(): void {
-  stopHaLiveTemp();
-  if (homeBadgeActive()) {
-    haWsWantOpen = true;
-    haWsUnit = null;
-    openHaWs();
+  // Refresh the token first when it is about to expire (same rule as the
+  // sensor-list fetch); otherwise use the stored one and rely on the 401 retry.
+  const expiresAt = parseInt(localStorage.getItem("haExpiresAt") || "0", 10);
+  if (
+    !isNaN(expiresAt) &&
+    expiresAt - Date.now() < 60000 &&
+    localStorage.getItem("haRefreshToken")
+  ) {
+    refreshHaToken(function (token) {
+      request(token || localStorage.getItem("haAccessToken"), false);
+    });
+  } else {
+    request(localStorage.getItem("haAccessToken"), true);
   }
 }
 
+/** Everything the watch cannot fetch itself: weather + sun times + HA reading. */
+function refreshAll(): void {
+  fetchWeather();
+  refreshHomeTemp();
+}
+
+// One fetch on launch; from then on the WATCH sets the pace by sending REFRESH
+// every 30 minutes (and on reconnect). There is deliberately no phone-side
+// timer: it would stall whenever the mobile app is frozen in the background,
+// and while the app is awake it would only double the traffic — every extra
+// refresh is an AppMessage that wakes the watch.
 Pebble.addEventListener("ready", function () {
   sendSettings();
-  fetchWeather();
-  setInterval(fetchWeather, WEATHER_REFRESH_MS);
-  syncHaLiveTemp();
+  refreshAll();
+});
+
+Pebble.addEventListener("appmessage", function (e) {
+  const payload = e && e.payload;
+  if (payload && payload.REFRESH !== undefined) {
+    console.log("Casita: refresh requested by the watch");
+    refreshAll();
+  }
 });
 
 // --- Home Assistant OAuth (phone-side) -------------------------------------
@@ -557,7 +554,11 @@ function fetchSensors(
   xhr.setRequestHeader("Content-Type", "application/json");
   xhr.onload = function () {
     if (xhr.status < 200 || xhr.status >= 300) {
-      console.log("Casita: HA template failed (" + xhr.status + "), falling back to /api/states");
+      console.log(
+        "Casita: HA template failed (" +
+          xhr.status +
+          "), falling back to /api/states",
+      );
       fallback();
       return;
     }
@@ -565,7 +566,9 @@ function fetchSensors(
     cb(list);
   };
   xhr.onerror = function () {
-    console.log("Casita: HA template request failed, falling back to /api/states");
+    console.log(
+      "Casita: HA template request failed, falling back to /api/states",
+    );
     fallback();
   };
   xhr.send(templateRequestBody(HA_SENSOR_TEMPLATE));
@@ -592,7 +595,11 @@ function refreshSensorCache(cb?: (list: HaSensor[]) => void): void {
     });
   };
   const expiresAt = parseInt(localStorage.getItem("haExpiresAt") || "0", 10);
-  if (!isNaN(expiresAt) && expiresAt - Date.now() < 60000 && localStorage.getItem("haRefreshToken")) {
+  if (
+    !isNaN(expiresAt) &&
+    expiresAt - Date.now() < 60000 &&
+    localStorage.getItem("haRefreshToken")
+  ) {
     refreshHaToken(function (token) {
       withToken(token || localStorage.getItem("haAccessToken"));
     });
@@ -652,7 +659,12 @@ function handleHaCode(code: string, state: string): void {
   xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
   xhr.onload = function () {
     if (xhr.status < 200 || xhr.status >= 300) {
-      console.log("Casita: HA token exchange failed: " + xhr.status + " " + xhr.responseText);
+      console.log(
+        "Casita: HA token exchange failed: " +
+          xhr.status +
+          " " +
+          xhr.responseText,
+      );
       return;
     }
     let token;
@@ -669,7 +681,8 @@ function handleHaCode(code: string, state: string): void {
     const expiresAt = Date.now() + (Number(token.expires_in) || 1800) * 1000;
     localStorage.setItem("haUrl", haUrl);
     localStorage.setItem("haAccessToken", token.access_token);
-    if (token.refresh_token) localStorage.setItem("haRefreshToken", token.refresh_token);
+    if (token.refresh_token)
+      localStorage.setItem("haRefreshToken", token.refresh_token);
     localStorage.setItem("haExpiresAt", String(expiresAt));
     // A fresh login is only a DRAFT connection: tokens are stored so the sensor
     // picker works, but the connection isn't committed to the watch until the
@@ -748,13 +761,17 @@ Pebble.addEventListener("webviewclosed", function (e) {
   }
 
   const config = parsed as Config;
-  const theme = config.theme === "light" || config.theme === "auto" ? config.theme : "dark";
+  const theme =
+    config.theme === "light" || config.theme === "auto" ? config.theme : "dark";
   localStorage.setItem("theme", theme);
   localStorage.setItem("showWeather", config.weather ? "1" : "0");
   localStorage.setItem("showSteps", config.steps ? "1" : "0");
   localStorage.setItem("showDate", config.date ? "1" : "0");
   localStorage.setItem("showBattery", config.battery ? "1" : "0");
-  localStorage.setItem("badgeOrder", badgeOrderToCode(normalizeBadgeOrder(config.order)));
+  localStorage.setItem(
+    "badgeOrder",
+    badgeOrderToCode(normalizeBadgeOrder(config.order)),
+  );
   localStorage.setItem("showHomeTemp", config.home ? "1" : "0");
   // The HA connection is committed here, on Save, from the page's draft state:
   //   haConnected === false -> the user disconnected (or never connected): clear
@@ -765,7 +782,10 @@ Pebble.addEventListener("webviewclosed", function (e) {
   if (parsed.haConnected === false) {
     clearHaConnection();
     console.log("Casita: HA disconnected (on save)");
-  } else if (parsed.haConnected === true && localStorage.getItem("haAccessToken")) {
+  } else if (
+    parsed.haConnected === true &&
+    localStorage.getItem("haAccessToken")
+  ) {
     localStorage.setItem("haConnected", "1");
     localStorage.setItem("haDraftConnected", "1");
     if (typeof parsed.haSensor === "string") {
@@ -774,7 +794,6 @@ Pebble.addEventListener("webviewclosed", function (e) {
     console.log("Casita: HA connection saved");
   }
   sendSettings();
-  fetchWeather();
-  // Restart the live temperature feed to match the freshly-saved sensor/toggle.
-  syncHaLiveTemp();
+  // Pull fresh values for whatever was just (re)configured.
+  refreshAll();
 });

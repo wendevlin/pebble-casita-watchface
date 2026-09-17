@@ -18,6 +18,20 @@ export type DCImage = InstanceType<typeof Poco.PebbleDrawCommandImage>;
 // The one render context for the whole watchface, bound to the host `screen`.
 export const render = new Poco(screen);
 
+// True on a round display (Pebble Round 2 / gabbro). Read once from the host
+// display object's `round` getter (pebble/display), which the SDK's `Screen`
+// typing doesn't declare — hence the cast. If the flag is missing, a square
+// framebuffer is assumed round.
+export const isRound: boolean = (() => {
+  try {
+    const shape = (screen as unknown as { round?: unknown }).round;
+    if (typeof shape === "boolean") return shape;
+  } catch (e) {
+    // fall through to the geometric guess
+  }
+  return render.width === render.height;
+})();
+
 export const timeFont = new render.Font("Bitham-Bold", 42);
 export const badgeFont = new render.Font("Gothic-Bold", 18);
 

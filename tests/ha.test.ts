@@ -13,10 +13,6 @@ import {
   parseSensorList,
   sensorsFromStates,
   matchesSensorQuery,
-  wsUrlFromHttp,
-  wsAuthMessage,
-  wsSubscribeEntitiesMessage,
-  parseWsStateUpdate,
   stateToTenthsC,
   HA_SENSOR_TEMPLATE,
   HA_CLIENT_ID,
@@ -181,37 +177,6 @@ describe("matchesSensorQuery", () => {
   });
   test("no match returns false", () => {
     expect(matchesSensorQuery(s, "kitchen")).toBe(false);
-  });
-});
-
-describe("websocket helpers", () => {
-  test("wsUrlFromHttp maps http->ws and https->wss with /api/websocket", () => {
-    expect(wsUrlFromHttp("https://ha.example.com")).toBe("wss://ha.example.com/api/websocket");
-    expect(wsUrlFromHttp("http://192.168.1.5:8123")).toBe("ws://192.168.1.5:8123/api/websocket");
-  });
-  test("auth + subscribe frames are well-formed JSON", () => {
-    expect(JSON.parse(wsAuthMessage("tok"))).toEqual({ type: "auth", access_token: "tok" });
-    expect(JSON.parse(wsSubscribeEntitiesMessage(3, "sensor.x"))).toEqual({
-      id: 3,
-      type: "subscribe_entities",
-      entity_ids: ["sensor.x"],
-    });
-  });
-});
-
-describe("parseWsStateUpdate", () => {
-  test("reads the initial snapshot (event.a)", () => {
-    const msg = { type: "event", event: { a: { "sensor.x": { s: "21.5", a: { unit_of_measurement: "°C" } } } } };
-    expect(parseWsStateUpdate(msg, "sensor.x")).toEqual({ state: "21.5", unit: "°C" });
-  });
-  test("reads an incremental change (event.c[...]['+'])", () => {
-    const msg = { type: "event", event: { c: { "sensor.x": { "+": { s: "22.1" } } } } };
-    expect(parseWsStateUpdate(msg, "sensor.x")).toEqual({ state: "22.1", unit: null });
-  });
-  test("returns null when nothing for the entity / wrong type", () => {
-    expect(parseWsStateUpdate({ type: "event", event: { a: { "sensor.y": { s: "1" } } } }, "sensor.x")).toBeNull();
-    expect(parseWsStateUpdate({ type: "result" }, "sensor.x")).toBeNull();
-    expect(parseWsStateUpdate(null, "sensor.x")).toBeNull();
   });
 });
 

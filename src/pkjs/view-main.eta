@@ -11,7 +11,7 @@
   </fieldset>
   <fieldset>
     <legend>Badges</legend>
-    <p class="hint">Toggle badges and use ▲ ▼ to set their left-to-right order.</p>
+    <p class="hint">Toggle badges and use ▲ ▼ to set their priority: the first badge sits top right and the rest fill leftwards, wrapping to a second row. On round watches the rows hold one, two and two.</p>
     <ul class="badges" id="badges">
       <% it.badges.forEach(function (b) { %>
       <li class="badge" data-badge="<%= b.name %>"<% if (b.name === 'home') { %> style="display:none"<% } %>>

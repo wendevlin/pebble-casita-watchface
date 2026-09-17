@@ -276,62 +276,9 @@ export function matchesSensorQuery(sensor: HaSensor, query: string): boolean {
   );
 }
 
-// --- Home Assistant WebSocket API (live sensor value) ---------------------
-// The home-temperature badge subscribes to a single entity over HA's WebSocket
-// API (wss://host/api/websocket). These helpers are the pure pieces (URL/frame
-// building + message parsing + unit conversion); the socket lifecycle itself
-// lives in index.ts. See https://developers.home-assistant.io/docs/api/websocket
-
-/** Derive the WebSocket endpoint from a normalized http(s) HA URL. */
-export function wsUrlFromHttp(haUrl: string): string {
-  return haUrl.replace(/^http/i, "ws") + "/api/websocket";
-}
-
-/** Frame sent to authenticate the socket once HA asks for auth. */
-export function wsAuthMessage(accessToken: string): string {
-  return JSON.stringify({ type: "auth", access_token: accessToken });
-}
-
-/** Frame that subscribes to compact state updates for a single entity. */
-export function wsSubscribeEntitiesMessage(id: number, entityId: string): string {
-  return JSON.stringify({ id: id, type: "subscribe_entities", entity_ids: [entityId] });
-}
-
-export interface WsStateUpdate {
-  /** New state string, or null when this frame carries no state for the entity. */
-  state: string | null;
-  /** Unit of measurement if present in this frame, else null. */
-  unit: string | null;
-}
-
-/**
- * Extract a state/unit update for `entityId` from a parsed `subscribe_entities`
- * event frame. Handles both the initial full snapshot (`event.a`) and the
- * incremental change (`event.c[...]["+"]`) shapes of the compact protocol.
- * Returns null when the frame has nothing for the entity.
- */
-export function parseWsStateUpdate(msg: unknown, entityId: string): WsStateUpdate | null {
-  if (!msg || typeof msg !== "object") return null;
-  const m = msg as { type?: unknown; event?: { a?: Record<string, unknown>; c?: Record<string, unknown> } };
-  if (m.type !== "event" || !m.event) return null;
-  const ev = m.event;
-  const readEntity = function (raw: unknown): WsStateUpdate | null {
-    if (!raw || typeof raw !== "object") return null;
-    const e = raw as { s?: unknown; a?: { unit_of_measurement?: unknown } };
-    const state = e.s == null ? null : String(e.s);
-    const unit = e.a && e.a.unit_of_measurement != null ? String(e.a.unit_of_measurement) : null;
-    if (state === null && unit === null) return null;
-    return { state: state, unit: unit };
-  };
-  if (ev.a && Object.prototype.hasOwnProperty.call(ev.a, entityId)) {
-    return readEntity(ev.a[entityId]);
-  }
-  if (ev.c && Object.prototype.hasOwnProperty.call(ev.c, entityId)) {
-    const chg = ev.c[entityId] as { "+"?: unknown };
-    return chg && chg["+"] ? readEntity(chg["+"]) : null;
-  }
-  return null;
-}
+// --- Home Assistant sensor value -------------------------------------------
+// The home-temperature badge reads a single entity via GET /api/states/<id>
+// on the watch-driven refresh cadence; the request itself lives in index.ts.
 
 /**
  * Convert a sensor's state string (in `unit`) to tenths of a degree Celsius —

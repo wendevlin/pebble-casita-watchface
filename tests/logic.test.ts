@@ -25,7 +25,11 @@ import {
   normalizeBadgeOrder,
   badgeOrderToCode,
   DEFAULT_BADGE_ORDER,
+  layoutBadges,
+  ROUND_SECOND_ROW_MAX,
+  RECT_FIRST_ROW_MAX,
 } from "../src/embeddedjs/logic";
+import { MARGIN, BADGE_GAP, PILL_H } from "../src/embeddedjs/constants";
 
 describe("expressionForHour", () => {
   test("night before morning", () => {
@@ -348,4 +352,133 @@ describe("formatTemperature", () => {
     expect(formatTemperature(WEATHER_UNKNOWN, "C")).toBe("--");
     expect(formatTemperature(NaN, "C")).toBe("--");
   });
+});
+
+describe("layoutBadges", () => {
+  const W = 200; // emery-sized area
+  const rightEdge = W - MARGIN;
+  const geom = { margin: MARGIN, gap: BADGE_GAP, pillHeight: PILL_H };
+  const rect = (widths: number[], areaWidth = W) =>
+    layoutBadges(widths, { areaWidth, round: false, ...geom });
+  const round = (widths: number[], areaWidth = 260) =>
+    layoutBadges(widths, { areaWidth, round: true, ...geom });
+  const rowOf = (l: ReturnType<typeof layoutBadges>, row: number) =>
+    l.placements.filter((p) => p.row === row);
+
+  test("nothing to show", () => {
+    expect(rect([])).toEqual({ placements: [], rows: 0 });
+    expect(round([], W)).toEqual({ placements: [], rows: 0 });
+  });
+
+  test("rect: one row fills from the right edge, first badge rightmost", () => {
+    const l = rect([50, 60, 40]);
+    expect(l.rows).toBe(1);
+    expect(l.placements).toEqual([
+      { index: 0, row: 0, x: rightEdge - 50 },
+      { index: 1, row: 0, x: rightEdge - 50 - BADGE_GAP - 60 },
+      { index: 2, row: 0, x: rightEdge - 50 - BADGE_GAP - 60 - BADGE_GAP - 40 },
+    ]);
+  });
+
+  test("rect: up to three badges stay on one row even when wide", () => {
+    const l = rect([90, 90, 90]);
+    expect(l.rows).toBe(1);
+    expect(RECT_FIRST_ROW_MAX).toBe(3);
+    // The over-wide trio may run past the left edge (accepted).
+    expect(l.placements[2].x).toBeLessThan(0);
+  });
+
+  test("rect: four badges -> three on top, fourth in the bottom-right corner", () => {
+    const l = rect([50, 50, 50, 70]);
+    expect(l.rows).toBe(2);
+    expect(rowOf(l, 0).map((p) => p.index)).toEqual([0, 1, 2]);
+    expect(rowOf(l, 1)).toEqual([{ index: 3, row: 1, x: rightEdge - 70 }]);
+  });
+
+  test("rect: five badges -> three on top, corners below with the middle clear", () => {
+    const l = rect([50, 50, 50, 70, 60]);
+    expect(l.rows).toBe(2);
+    expect(rowOf(l, 0).map((p) => p.index)).toEqual([0, 1, 2]);
+    expect(rowOf(l, 0)[0].x).toBe(rightEdge - 50);
+    const second = rowOf(l, 1);
+    expect(second).toEqual([
+      { index: 3, row: 1, x: rightEdge - 70 }, // right corner
+      { index: 4, row: 1, x: MARGIN }, // left corner
+    ]);
+    // Gap between them is the free middle for the roof peak.
+    expect(second[0].x - (second[1].x + 60)).toBeGreaterThan(0);
+  });
+
+  test("rect: more than five keeps filling the second row inward, last still in the left corner", () => {
+    const l = rect([40, 40, 40, 40, 40, 40]);
+    expect(l.rows).toBe(2);
+    expect(rowOf(l, 1).map((p) => p.index)).toEqual([3, 4, 5]);
+    expect(rowOf(l, 1)[0].x).toBe(rightEdge - 40);
+    expect(rowOf(l, 1)[1].x).toBe(rightEdge - 40 - BADGE_GAP - 40);
+    expect(rowOf(l, 1)[2].x).toBe(MARGIN);
+  });
+
+  test("round: single badge centred in the top row", () => {
+    const l = round([60]);
+    expect(l.rows).toBe(1);
+    expect(l.placements).toEqual([{ index: 0, row: 0, x: 100 }]);
+  });
+
+  test("round: first badge alone on top, next two centred below, #2 on the right", () => {
+    const l = round([60, 80, 40, 50]);
+    expect(l.rows).toBe(3);
+    expect(rowOf(l, 0)).toEqual([{ index: 0, row: 0, x: 100 }]);
+    const second = rowOf(l, 1);
+    expect(second.map((p) => p.index)).toEqual([1, 2]);
+    expect(ROUND_SECOND_ROW_MAX).toBe(2);
+    const total = 80 + BADGE_GAP + 40;
+    const right = Math.floor(130 + total / 2);
+    expect(second[0].x).toBe(right - 80);
+    expect(second[1].x).toBe(right - 80 - BADGE_GAP - 40);
+    // The pair is centred: slack on both sides matches within 1px rounding.
+    expect(Math.abs(second[1].x - (260 - (second[0].x + 80)))).toBeLessThanOrEqual(1);
+    // The fourth badge already opens the third row, at the right edge.
+    expect(rowOf(l, 2).map((p) => p.index)).toEqual([3]);
+  });
+
+  test("round: three badges -> 1 + 2, no third row", () => {
+    const l = round([60, 80, 40]);
+    expect(l.rows).toBe(2);
+    expect(rowOf(l, 1).map((p) => p.index)).toEqual([1, 2]);
+  });
+
+  test("round: two badges -> one on top, one below", () => {
+    const l = round([50, 70]);
+    expect(l.rows).toBe(2);
+    expect(rowOf(l, 1)).toEqual([{ index: 1, row: 1, x: 130 - 35 }]);
+  });
+
+  test("round: fourth badge goes to a third row at the circle's right edge", () => {
+    const l = round([50, 50, 50, 70]);
+    expect(l.rows).toBe(3);
+    const third = rowOf(l, 2);
+    expect(third.map((p) => p.index)).toEqual([3]);
+    // Row 3 top = margin + 2*(pill+gap); chord half at that height on r=130.
+    const y = MARGIN + 2 * (PILL_H + BADGE_GAP);
+    const half = Math.sqrt(130 * 130 - (130 - y) * (130 - y));
+    expect(third[0].x).toBe(Math.floor(130 + half) - 70);
+    // Inside the bounding square, and clear of the centre.
+    expect(third[0].x + 70).toBeLessThanOrEqual(260);
+    expect(third[0].x).toBeGreaterThan(130);
+  });
+
+  test("round: fifth badge is pinned to the circle's left edge, middle clear", () => {
+    const l = round([50, 50, 50, 70, 60]);
+    expect(l.rows).toBe(3);
+    const third = rowOf(l, 2);
+    expect(third.map((p) => p.index)).toEqual([3, 4]);
+    const y = MARGIN + 2 * (PILL_H + BADGE_GAP);
+    const half = Math.sqrt(130 * 130 - (130 - y) * (130 - y));
+    expect(third[1].x).toBe(Math.ceil(130 - half));
+    expect(third[0].x).toBe(Math.floor(130 + half) - 70);
+    // Symmetric about the centre (within rounding) with a free middle.
+    expect(Math.abs(130 - third[1].x - (third[0].x + 70 - 130))).toBeLessThanOrEqual(1);
+    expect(third[0].x - (third[1].x + 60)).toBeGreaterThan(40);
+  });
+
 });

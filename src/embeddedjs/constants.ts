@@ -39,6 +39,7 @@ export const MESSAGE_KEYS = [
   "SHOW_HOME_TEMP",
   "SUNRISE",
   "SUNSET",
+  "REFRESH",
 ];
 
 // --------------------------------------------------------------------------- //

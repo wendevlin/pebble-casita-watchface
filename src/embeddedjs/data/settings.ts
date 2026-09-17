@@ -38,7 +38,8 @@ export interface Settings {
   showDate: boolean;
   /** Show the watch battery level as a badge. */
   showBattery: boolean;
-  /** Left→right order the (enabled) badges are drawn in. */
+  /** Priority order of the badges: the first fills the top-right slot, the
+   * rest follow leftwards (see logic.layoutBadges). */
   badgeOrder: BadgeId[];
   /** Last weather reading in tenths of a degree Celsius (WEATHER_UNKNOWN = none). */
   weatherTemp: number;

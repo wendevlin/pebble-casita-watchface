@@ -44,6 +44,6 @@ const html = eta.renderString(template, {
 });
 
 const banner =
-  "// AUTO-GENERATED from src/pkjs/config.eta by tools/render-config.mjs. Do not edit.\n";
+  "// AUTO-GENERATED from src/pkjs/config.eta by tools/render-config.ts. Do not edit.\n";
 writeFileSync(outPath, `${banner}export const CONFIG_HTML = ${JSON.stringify(html)};\n`);
 console.log(`rendered config.eta -> src/pkjs/config-html.ts (${html.length} chars)`);
