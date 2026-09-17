@@ -87,14 +87,24 @@ interface Watch {
   addEventListener(event: TimeEventType, callback: (event: TimeChangeEvent) => void): void;
   addEventListener(event: "connected", callback: () => void): void;
   addEventListener(event: "resize", callback: () => void): void;
+  /** Fired before (will) / after (did) the system's focus transition. */
+  addEventListener(event: "willFocus" | "didFocus", callback: (inFocus: boolean) => void): void;
   removeEventListener(event: TimeEventType, callback: (event: TimeChangeEvent) => void): void;
   removeEventListener(event: "connected", callback: () => void): void;
   removeEventListener(event: "resize", callback: () => void): void;
+  removeEventListener(event: "willFocus" | "didFocus", callback: (inFocus: boolean) => void): void;
   readonly connected: ConnectionState;
   readonly hour12: boolean;
   readonly model: number;
 }
 declare const watch: Watch;
+
+// Timers provided by the host runtime (Moddable `timer` module behind the
+// familiar globals).
+declare function setTimeout(callback: () => void, delay: number): number;
+declare function clearTimeout(id: number): void;
+declare function setInterval(callback: () => void, delay: number): number;
+declare function clearInterval(id: number): void;
 
 // Persistent key/value storage exposed as a WebStorage-compatible global by the
 // Pebble host runtime (backed by the watch's key-value store, keyed per UUID).

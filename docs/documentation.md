@@ -164,6 +164,16 @@ How it works (all phone-side):
   dropped: every pushed reading is an AppMessage that wakes the watch, and a
   room temperature does not need that.
 
+## No white flash on focus return
+
+The face paints straight into the framebuffer, but the window created in
+`src/c/mdbl.c` has a root layer, and with the default white background the
+firmware repainted the window white whenever the face came back into view after
+a notification or the menu — a visible flash until the next JS frame. The window
+background is therefore `GColorClear`: the root layer paints nothing and the last
+JS frame simply stays on screen. (A zoom-in intro animation was tried on top of
+this and removed again: it read as distracting on the wrist.)
+
 ## Refresh cadence
 
 Weather, sun times and the Home Assistant reading all refresh together, every
@@ -314,7 +324,7 @@ async C→JS event, so the value is simply read during the once-a-minute frame.
 ├── resources/icons/        # Generated badge .pdc icons (`bun run resources`)
 ├── src/
 │   ├── c/
-│   │   ├── mdbl.c          # Native shim that boots the Moddable machine
+│   │   ├── mdbl.c          # Native shim that boots the Moddable machine (clear window bg)
 │   │   └── casita_ffi.c    # Native FFI glue exposing the battery level to JS
 │   ├── embeddedjs/
 │   │   ├── main.ts         # Entry point: just the runtime event handlers
@@ -364,7 +374,16 @@ in `logic.ts` so it can be unit-tested off-device.
 > **Memory note:** a Pebble mod runs in a small fixed XS heap. `src/c/mdbl.c`
 > hand-sizes that heap (via `moddable_createMachine`'s creation record) so the
 > modular code fits; the firmware validates the record and simply won't launch
-> the app if the request is too large, so it fails safe.
+> the app if the request is too large, so it fails safe. The slot partition is
+> 52 KB: instantiating the modules at launch runs with the garbage collector
+> off and needs ~30 KB of slots for this code base, and at 40 KB adding one
+> more module killed the launch with "memory full" before a line of `main.ts`
+> had run. The XS heap comes out of the ~122 KB app heap together with
+> the ~25 KB mod archive, so the native side is kept lean: the AppMessage inbox
+> is 512 bytes instead of the firmware maximum, and only the current Casita
+> expression's PDC is held in memory. `kModdableCreationFlagLogInstrumentation`
+> in `mdbl.c` prints per-second heap samples to `pebble logs` when sizing needs
+> a re-check.
 
 ## Prerequisites
 

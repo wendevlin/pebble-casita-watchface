@@ -20,12 +20,17 @@ import { applyMessage } from "data/settings";
 import { draw } from "draw/face";
 import { initHw } from "hw";
 
+
 // Live settings + weather updates from the phone. Keys match package.json
-// `messageKeys` (see constants.MESSAGE_KEYS). The outbox only ever carries the
-// one-integer REFRESH request, so it is kept tiny.
+// `messageKeys` (see constants.MESSAGE_KEYS). Both buffers are sized to what
+// actually travels — the default inbox is the firmware maximum (kilobytes) and
+// would eat native heap the XS slot partition needs (see src/c/mdbl.c). The
+// largest inbound message is the settings dictionary (~100 bytes); the outbox
+// only ever carries the one-integer REFRESH request.
 let inbox: Message;
 inbox = new Message({
   keys: MESSAGE_KEYS,
+  input: 512,
   output: 64,
   onReadable() {
     applyMessage(inbox.read());

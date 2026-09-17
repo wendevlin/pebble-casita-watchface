@@ -35,18 +35,20 @@ export const isRound: boolean = (() => {
 export const timeFont = new render.Font("Bitham-Bold", 42);
 export const badgeFont = new render.Font("Gothic-Bold", 18);
 
-// Decode each PDC once and reuse it on every redraw.
-const casitaCache: Record<number, DCImage> = {};
+// Decode each badge icon once and reuse it on every redraw. Casita is a
+// single-slot cache instead: the expression changes a few times a day, the
+// PDCs live in the native app heap (which the enlarged XS slot partition has
+// squeezed — see src/c/mdbl.c), and re-reading a ~1 KB resource on an hour
+// boundary is nothing.
+let currentCasita: { id: number; image: DCImage } | undefined;
 const iconCache: Record<number, DCImage> = {};
 
-/** Returns the (cached) full-size Casita expression image for a resource id. */
+/** Returns the full-size Casita expression image for a resource id. */
 export function casitaImage(id: Casita): DCImage {
-  let image = casitaCache[id];
-  if (!image) {
-    image = new Poco.PebbleDrawCommandImage(id);
-    casitaCache[id] = image;
+  if (!currentCasita || currentCasita.id !== id) {
+    currentCasita = { id, image: new Poco.PebbleDrawCommandImage(id) };
   }
-  return image;
+  return currentCasita.image;
 }
 
 export interface SizedImage {
@@ -72,8 +74,14 @@ export function casitaImageFitting(id: Casita, maxHeight: number): SizedImage {
   if (maxHeight <= 0 || full.height <= maxHeight) {
     return { image: full, width: full.width, height: full.height };
   }
-  const h = maxHeight | 0;
-  const scale = maxHeight / full.height;
+  return casitaImageAtHeight(id, maxHeight);
+}
+
+// Clone + scale to an exact height, through the single-slot cache.
+function casitaImageAtHeight(id: Casita, height: number): SizedImage {
+  const full = casitaImage(id);
+  const h = height | 0;
+  const scale = height / full.height;
   if (!scaledCasita || scaledCasita.id !== id || scaledCasita.height !== h) {
     // clone() yields a scalable draw-command list; the runtime image isn't.
     const clone = full.clone();

@@ -12,11 +12,16 @@ extern void fxBuildFFI(txMachine* the, txAPI* api);
 //
 // moddable_createMachine() accepts a heap-sizing record. The default XS arena
 // (~32 KB) is too small for this watchface once it is split into modules, so
-// we hand-size the partitions (slot/chunk/stack). Measured (via
-// kModdableCreationFlagLogInstrumentation) the live set stays comfortably below
-// these totals, which are kept with headroom for the per-frame image scaling.
-// The firmware validates the record and refuses to launch if the total is too
-// large, so this fails safe.
+// we hand-size the partitions (slot/chunk/stack).
+//
+// Slot budget: instantiating the mod's modules at launch happens with the
+// garbage collector off, and it needs roughly 30 KB of slots for this code
+// base. With 40 KB the launch died with "Slot allocation: failed in fixed size
+// heap" as soon as one more module was added (nothing of main.ts had run yet),
+// so the slot partition is 52 KB. The native app heap pays for that; the
+// AppMessage inbox in main.ts is sized down to keep the balance. Measured via
+// kModdableCreationFlagLogInstrumentation. The firmware validates the record
+// and refuses to launch if the total is too large, so this fails safe.
 //
 // cr.fxBuildFFI wires our native FFI bindings into the VM: the firmware
 // FFI_constructor reads this pointer when JS does `new FFI()` and calls it to
@@ -28,12 +33,18 @@ extern void fxBuildFFI(txMachine* the, txAPI* api);
 // it.
 int main(void) {
   Window *w = window_create();
+  // The JS side paints straight into the framebuffer (Poco), not through
+  // layers. With the default white background the root layer would repaint
+  // the window white every time the face comes back from a notification or
+  // the menu — a visible flash until the next JS frame. GColorClear makes the
+  // root layer paint nothing, so the last JS frame stays on screen.
+  window_set_background_color(w, GColorClear);
   window_stack_push(w, true);
 
   ModdableCreationRecord cr = {
     .recordSize = sizeof(cr),
     .stack = 5 * 1024,
-    .slot = 40 * 1024,
+    .slot = 52 * 1024,
     .chunk = 20 * 1024,
     .flags = 0,
     .fxBuildFFI = (void *)fxBuildFFI,
