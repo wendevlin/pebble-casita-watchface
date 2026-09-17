@@ -11,7 +11,6 @@ import {
   SHOW_BATTERY_KEY,
   SHOW_DATE_KEY,
   SHOW_HOME_TEMP_KEY,
-  SHOW_SECONDS_KEY,
   SHOW_STEPS_KEY,
   SHOW_WEATHER_KEY,
   SUNRISE_KEY,
@@ -41,8 +40,6 @@ export interface Settings {
   showBattery: boolean;
   /** Left→right order the (enabled) badges are drawn in. */
   badgeOrder: BadgeId[];
-  /** Show seconds next to the clock while the backlight window is active. */
-  showSeconds: boolean;
   /** Last weather reading in tenths of a degree Celsius (WEATHER_UNKNOWN = none). */
   weatherTemp: number;
   /** Show the Home Assistant home-temperature badge. */
@@ -84,7 +81,6 @@ export const settings: Settings = {
   showDate: normalizeToggle(localStorage.getItem(SHOW_DATE_KEY), true),
   showBattery: normalizeToggle(localStorage.getItem(SHOW_BATTERY_KEY), true),
   badgeOrder: normalizeBadgeOrder(localStorage.getItem(BADGE_ORDER_KEY)),
-  showSeconds: normalizeToggle(localStorage.getItem(SHOW_SECONDS_KEY), false),
   weatherTemp: readStoredTemp(),
   showHomeTemp: normalizeToggle(localStorage.getItem(SHOW_HOME_TEMP_KEY), true),
   homeTemp: readStoredHomeTemp(),
@@ -128,10 +124,6 @@ export function applyMessage(message: Map<string | number, unknown>): void {
   if (message.has("BADGE_ORDER")) {
     settings.badgeOrder = normalizeBadgeOrder(message.get("BADGE_ORDER"));
     localStorage.setItem(BADGE_ORDER_KEY, badgeOrderToCode(settings.badgeOrder));
-  }
-  if (message.has("SHOW_SECONDS")) {
-    settings.showSeconds = normalizeToggle(message.get("SHOW_SECONDS"), false);
-    localStorage.setItem(SHOW_SECONDS_KEY, settings.showSeconds ? "1" : "0");
   }
   if (message.has("HA_TEMP")) {
     const raw = message.get("HA_TEMP");

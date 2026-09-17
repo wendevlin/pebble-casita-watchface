@@ -56,7 +56,6 @@ interface Config {
   date: boolean;
   battery: boolean;
   order: string[];
-  seconds: boolean;
   home: boolean;
   ha: HaConfig;
   view: string;
@@ -198,7 +197,6 @@ function configPage(
   showDate: boolean,
   showBattery: boolean,
   order: string[],
-  showSeconds: boolean,
   initialView: string,
 ): string {
   const config: Config = {
@@ -208,7 +206,6 @@ function configPage(
     date: showDate,
     battery: showBattery,
     order: order,
-    seconds: showSeconds,
     home: boolPref("showHomeTemp", true),
     ha: haStatus(),
     view: initialView === "ha" ? "ha" : "main",
@@ -226,7 +223,6 @@ function openConfig(initialView: string): void {
       boolPref("showDate", true),
       boolPref("showBattery", true),
       currentBadgeOrder(),
-      boolPref("showSeconds", false),
       initialView,
     )
   );
@@ -249,7 +245,6 @@ function sendSettings(): void {
       SHOW_DATE: boolPref("showDate", true) ? 1 : 0,
       SHOW_BATTERY: boolPref("showBattery", true) ? 1 : 0,
       BADGE_ORDER: badgeOrderToCode(currentBadgeOrder()),
-      SHOW_SECONDS: boolPref("showSeconds", false) ? 1 : 0,
       SHOW_HOME_TEMP: homeBadgeActive() ? 1 : 0,
     },
     function () {},
@@ -760,7 +755,6 @@ Pebble.addEventListener("webviewclosed", function (e) {
   localStorage.setItem("showDate", config.date ? "1" : "0");
   localStorage.setItem("showBattery", config.battery ? "1" : "0");
   localStorage.setItem("badgeOrder", badgeOrderToCode(normalizeBadgeOrder(config.order)));
-  localStorage.setItem("showSeconds", config.seconds ? "1" : "0");
   localStorage.setItem("showHomeTemp", config.home ? "1" : "0");
   // The HA connection is committed here, on Save, from the page's draft state:
   //   haConnected === false -> the user disconnected (or never connected): clear

@@ -11,7 +11,6 @@ import {
   minutesOfDay,
   SUN_UNKNOWN,
   formatTime,
-  formatSeconds,
   DEFAULT_THEME,
   normalizeToggle,
   toggleToCode,
@@ -113,21 +112,6 @@ describe("formatTime 12h", () => {
   });
   test("afternoon wraps to 12h", () => {
     expect(formatTime(at(13, 30), true)).toBe("1:30");
-  });
-});
-
-describe("formatSeconds", () => {
-  test("pads single-digit seconds", () => {
-    expect(formatSeconds(new Date(2020, 0, 1, 7, 5, 3))).toBe("03");
-  });
-  test("zero seconds", () => {
-    expect(formatSeconds(new Date(2020, 0, 1, 7, 5, 0))).toBe("00");
-  });
-  test("two-digit seconds", () => {
-    expect(formatSeconds(new Date(2020, 0, 1, 7, 5, 45))).toBe("45");
-  });
-  test("max seconds", () => {
-    expect(formatSeconds(new Date(2020, 0, 1, 7, 5, 59))).toBe("59");
   });
 });
 

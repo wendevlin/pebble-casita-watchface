@@ -1,7 +1,7 @@
 {
   "name": "casita-watchface",
-  "author": "Wendelin",
-  "version": "1.0.1",
+  "author": "wendevlin",
+  "version": "1.1.0",
   "description": "A cheerful Casita watchface with live badges for weather, steps, date, battery, and Home Assistant temperature — expressions change throughout the day.",
   "keywords": [
     "pebble-app"
@@ -44,7 +44,6 @@
       "SHOW_STEPS",
       "SHOW_DATE",
       "BADGE_ORDER",
-      "SHOW_SECONDS",
       "SHOW_BATTERY",
       "HA_TEMP",
       "SHOW_HOME_TEMP",

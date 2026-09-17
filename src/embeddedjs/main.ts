@@ -19,7 +19,6 @@ import { MESSAGE_KEYS } from "constants";
 import { applyMessage } from "data/settings";
 import { draw } from "draw/face";
 import { initHw } from "hw";
-import { initWake, refreshSubscription } from "wake";
 
 // Live settings + weather updates from the phone. Keys match package.json
 // `messageKeys` (see constants.MESSAGE_KEYS).
@@ -28,8 +27,6 @@ inbox = new Message({
   keys: MESSAGE_KEYS,
   onReadable() {
     applyMessage(inbox.read());
-    // A message may have toggled showSeconds — (un)subscribe accordingly.
-    refreshSubscription();
     draw();
   },
 });
@@ -43,11 +40,8 @@ watch.addEventListener("connected", draw);
 // minute tick.
 watch.addEventListener("resize", draw);
 
-// Build the native FFI bridge (backlight + battery) once, from this shallow
-// startup stack, so its construction never happens deep inside the first frame.
+// Build the native FFI bridge (battery) once, from this shallow startup stack,
+// so its construction never happens deep inside the first frame.
 initHw();
-
-// Wire the wake-gesture → show-seconds controller to this frame's redraw.
-initWake(draw);
 
 draw();

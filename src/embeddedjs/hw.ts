@@ -1,12 +1,10 @@
 /*
- * Shared native-hardware accessor.
+ * Native-hardware accessor.
  *
- * Both the "show seconds while the light is on" feature (wake.ts) and the
- * battery badge (draw/badges.ts) need synchronous native state that is only
- * reachable through the firmware FFI bridge (`new FFI()` -> fxBuildFFI in
- * src/c/casita_ffi.c). Constructing the FFI object twice would waste slots in
- * the tiny XS heap, so this module owns the single lazily-created instance and
- * exposes each reading as a small, failure-tolerant getter.
+ * The battery badge (draw/badges.ts) needs the charge level, which is native
+ * state reachable only through the firmware FFI bridge (`new FFI()` ->
+ * fxBuildFFI in src/c/casita_ffi.c). This module owns the single lazily-created
+ * FFI instance and exposes each reading as a small, failure-tolerant getter.
  */
 
 import FFI from "ffi";
@@ -39,17 +37,6 @@ function instance(): FFI | undefined {
  */
 export function initHw(): void {
   instance();
-}
-
-/** True while the backlight is currently on (false if FFI is unavailable). */
-export function lightOn(): boolean {
-  const f = instance();
-  if (!f) return false;
-  try {
-    return f.casita_light_on() !== 0;
-  } catch (e) {
-    return false;
-  }
 }
 
 /**

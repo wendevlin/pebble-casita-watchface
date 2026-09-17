@@ -1,5 +1,6 @@
 import { expect, test, describe } from "bun:test";
 import { Casita, Icon } from "../src/embeddedjs/logic";
+import { MESSAGE_KEYS } from "../src/embeddedjs/constants";
 import pkg from "../package.json";
 
 /*
@@ -47,5 +48,20 @@ describe("resource IDs match package.json media order", () => {
     for (const id of ids) {
       expect(media[id - 1]?.type, `resource #${id} (${media[id - 1]?.name})`).toBe("raw");
     }
+  });
+});
+
+/*
+ * AppMessage keys are numbered by position too: the watch maps each name in
+ * constants.MESSAGE_KEYS to `10000 + index`, while the phone side resolves the
+ * same names through the codes `pebble build` assigns from package.json
+ * `messageKeys` (also by position). The two lists are maintained by hand in
+ * different files, so any divergence silently sends settings under the wrong
+ * code — a badge toggle would land on the theme, and so on. This guards the
+ * lists against each other.
+ */
+describe("AppMessage keys match package.json messageKeys", () => {
+  test("same names in the same order", () => {
+    expect(MESSAGE_KEYS).toEqual(pkg.pebble.messageKeys);
   });
 });

@@ -65,12 +65,6 @@ export function formatTime(date: Date, hour12: boolean): string {
   return pad2(date.getHours()) + ":" + minutes;
 }
 
-/** Formats the seconds as a two-digit string ("00".."59"), shown next to the
- * time while the backlight window is active. */
-export function formatSeconds(date: Date): string {
-  return pad2(date.getSeconds());
-}
-
 // --------------------------------------------------------------------------- //
 // Theme (light/dark) setting
 // --------------------------------------------------------------------------- //

@@ -15,7 +15,6 @@ export const SHOW_DATE_KEY = "showDate";
 export const SHOW_BATTERY_KEY = "showBattery";
 export const WEATHER_TEMP_KEY = "weatherTemp";
 export const BADGE_ORDER_KEY = "badgeOrder";
-export const SHOW_SECONDS_KEY = "showSeconds";
 export const HOME_TEMP_KEY = "homeTemp";
 export const SHOW_HOME_TEMP_KEY = "showHomeTemp";
 // Sunrise/sunset in minutes since local midnight (SUN_UNKNOWN = none yet), used
@@ -35,7 +34,6 @@ export const MESSAGE_KEYS = [
   "SHOW_STEPS",
   "SHOW_DATE",
   "BADGE_ORDER",
-  "SHOW_SECONDS",
   "SHOW_BATTERY",
   "HA_TEMP",
   "SHOW_HOME_TEMP",
@@ -67,7 +65,3 @@ export const BADGE_TEXT_NUDGE = 2;
 
 export const CLOCK_MARGIN_BOTTOM = 6;
 export const CASITA_MIN_TOP_GAP = 4;
-
-// Horizontal gap between the main clock and the small seconds shown beside it
-// while the backlight window is active.
-export const SECONDS_GAP = 4;

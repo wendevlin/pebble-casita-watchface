@@ -10,11 +10,6 @@
     </select>
   </fieldset>
   <fieldset>
-    <legend>Clock</legend>
-    <label><input type="checkbox" name="seconds"> Show seconds when the light is on</label>
-    <p class="hint">Raise your wrist, shake, or tap to light the screen and reveal seconds for a few seconds.</p>
-  </fieldset>
-  <fieldset>
     <legend>Badges</legend>
     <p class="hint">Toggle badges and use ▲ ▼ to set their left-to-right order.</p>
     <ul class="badges" id="badges">

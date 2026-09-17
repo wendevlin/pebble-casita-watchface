@@ -13,7 +13,6 @@
 		"draw/casita": "./draw/casita",
 		"draw/badges": "./draw/badges",
 		"draw/face": "./draw/face",
-		"wake": "./wake",
 		"hw": "./hw",
 		"ffi": "./ffi"
 	}

@@ -62,11 +62,6 @@ Pebble/Rebble phone app ("Settings"). Options:
   line they wrap onto a second line that sits in the empty space beside Casita's
   roof, so Casita keeps its full size. A second row of exactly two badges is
   split to the left and right corners so the roof peak sits clear between them.
-- **Clock — Show seconds when the light is on:** when enabled (default **off**),
-  a small seconds counter appears next to the clock while the backlight is on —
-  raise your wrist, double tap, or press the back button to light the screen and
-  the seconds appear for as long as the light stays up, then disappear when it
-  times out. See [Seconds when lit](#seconds-when-lit) for how this works.
 
 How it works:
 
@@ -81,9 +76,9 @@ How it works:
   the page is what actually applies the settings — hence Save closes the page.
 - On save, the phone persists the choices (`localStorage`) and sends them to the
   watch over AppMessage: `THEME` (0 = light, 1 = dark), `SHOW_WEATHER`,
-  `SHOW_STEPS`, `SHOW_DATE` and `SHOW_BATTERY` (0 = off, 1 = on), `BADGE_ORDER`
-  (the left-to-right badge order as a compact code string, e.g. `dwsb` = date,
-  weather, steps, battery), and `SHOW_SECONDS` (0 = off, 1 = on).
+  `SHOW_STEPS`, `SHOW_DATE` and `SHOW_BATTERY` (0 = off, 1 = on),
+  and `BADGE_ORDER` (the left-to-right badge order as a compact code string,
+  e.g. `dwsb` = date, weather, steps, battery).
 - The watch persists every preference in its own `localStorage`, so it renders
   with the right colors and badges immediately on launch, before the phone
   reconnects.
@@ -199,10 +194,10 @@ overlapped. Their left-to-right order is configurable from the settings page
 - **Steps** are read directly on the watch via `Health.metric.query({ metric: "step count" })`
   (which sums today's total) and refresh every minute. If Health is unavailable
   the badge is hidden.
-- **Battery** is the watch's own charge level, read on the watch through the same
-  native FFI bridge as the seconds feature (`casita_battery_percent()`, a wrapper
-  around `battery_state_service_peek()`); shown as a whole percent, hidden if FFI
-  is unavailable. Its icon is colour-coded by level: green at ≥ 70%, orange at
+- **Battery** is the watch's own charge level, read on the watch through a small
+  native FFI bridge (`casita_battery_percent()`, a wrapper around
+  `battery_state_service_peek()` — see [Native FFI bridge](#native-ffi-bridge));
+  shown as a whole percent, hidden if FFI is unavailable. Its icon is colour-coded by level: green at ≥ 70%, orange at
   ≥ 30%, red below 30% (three pre-tinted PDC variants generated from the one
   `battery.svg`).
 - **Date** shows the current day of month, read from the watch clock and
@@ -229,44 +224,35 @@ border colors are bumped to the nearest values that actually render as a
 distinct gray: `#b0b0b0` (→ 170) on the light background and `#666666` (→ 85) on
 the dark background.
 
-## Seconds when lit
+## Native FFI bridge
 
-With **Show seconds when the light is on** enabled, a small seconds counter is
-drawn to the right of the clock (in the badge font, bottom-aligned) while the
-backlight is lit, and disappears again when the light times out. Because it
-tracks the *real* backlight, every way the screen lights up works uniformly:
-the back button, a double tap, and a wrist raise all reveal the seconds.
+The battery badge needs the watch's charge level, which lives behind a firmware
+syscall. The face runs as a Moddable *mod*, whose JavaScript cannot call
+firmware syscalls directly, but the C host (`src/c`) can — so a tiny FFI binding
+bridges the two:
 
-How it works — reading the real backlight state:
+- `src/c/casita_ffi.c` defines `casita_battery_percent()` (a one-line wrapper
+  around `battery_state_service_peek()`) plus an `fxBuildFFI` that registers it
+  as a method.
+- `src/c/mdbl.c` wires that `fxBuildFFI` into the Moddable creation record.
+- On the JS side `hw.ts` does `new FFI()` — resolving the firmware-preloaded
+  `ffi` module, whose constructor invokes our `fxBuildFFI` — and exposes
+  `batteryPercent()` to the battery badge.
 
-- **The real source is the firmware backlight.** The correct trigger is the
-  firmware's `light_is_on()`, which is true for exactly as long as the backlight
-  is up regardless of what caused it. An earlier approach that watched the
-  accelerometer tap interrupt was abandoned: that interrupt only fires on a
-  deliberate sharp knock, so a button press or a gentle wrist raise — the very
-  gestures that light the screen — never registered.
-- **A tiny native FFI binding exposes firmware syscalls to JS.** The face runs as
-  a Moddable *mod*, whose JavaScript cannot call firmware syscalls directly, but
-  the C host (`src/c`) can. `src/c/casita_ffi.c` defines `casita_light_on()`
-  (a one-line wrapper around `light_is_on()`) and `casita_battery_percent()`
-  (wrapping `battery_state_service_peek()`), plus an `fxBuildFFI` that registers
-  them as methods. `src/c/mdbl.c` wires that `fxBuildFFI` into the Moddable
-  creation record. On the JS side the shared `hw.ts` module does `new FFI()` —
-  resolving the firmware-preloaded `ffi` module, whose constructor invokes our
-  `fxBuildFFI` — and exposes `lightOn()` (used by `wake.ts`) and
-  `batteryPercent()` (used by the battery badge).
-- **We poll, because the backlight can't push an event.** The FFI table is a set
-  of *synchronous getters*; the firmware cannot deliver an async C→JS event when
-  the light turns on or off. So while the setting is enabled, `wake.ts`
-  subscribes to `secondchange` and reads `casita_light_on()` once per second.
-  The full-face redraw runs only while the light is actually on (to advance the
-  digits), plus once on the on→off edge to clear the seconds; the off-state ticks
-  are cheap no-op wakes. The subscription is created only while the setting is on
-  and torn down when it's off, so it costs nothing when disabled.
+The FFI table is a set of *synchronous getters*: the firmware cannot deliver an
+async C→JS event, so the value is simply read during the once-a-minute frame.
 
-> **Note:** `new FFI()` and the native binding are created lazily and wrapped in
-> try/catch — if FFI is ever unavailable the feature simply stays inert (no
-> seconds) rather than crashing.
+> **Note:** `new FFI()` is built once at startup (from `main.ts`, not from inside
+> a frame, to keep the deep constructor off the small XS stack) and every call is
+> wrapped in try/catch — if FFI is ever unavailable the badge just hides itself
+> rather than crashing.
+
+> **Battery note:** the face deliberately does no per-second work. A watchface
+> that subscribes to the runtime's `secondchange` tick wakes the CPU and the JS
+> VM 60 times a minute, which is the largest avoidable drain a watchface can
+> have. An earlier *show seconds while the backlight is lit* feature polled
+> `light_is_on()` at 1 Hz for exactly this reason and was removed: displaying
+> seconds was not worth the overnight battery cost.
 
 ## Layout
 
@@ -279,7 +265,7 @@ How it works — reading the real backlight state:
 ├── src/
 │   ├── c/
 │   │   ├── mdbl.c          # Native shim that boots the Moddable machine
-│   │   └── casita_ffi.c    # Native FFI glue exposing light_is_on()/battery to JS
+│   │   └── casita_ffi.c    # Native FFI glue exposing the battery level to JS
 │   ├── embeddedjs/
 │   │   ├── main.ts         # Entry point: just the runtime event handlers
 │   │   ├── constants.ts    # Storage keys, message keys, badge geometry
@@ -292,8 +278,7 @@ How it works — reading the real backlight state:
 │   │   │   ├── casita.ts   # Casita expression selection
 │   │   │   ├── badges.ts   # Right-aligned badge rows (date/weather/steps/battery)
 │   │   │   └── face.ts     # Full-frame composition
-│   │   ├── wake.ts         # Backlight-polling "show seconds when lit"
-│   │   ├── hw.ts           # Shared FFI accessor (backlight + battery)
+│   │   ├── hw.ts           # FFI accessor (battery level)
 │   │   ├── ffi.d.ts        # Types for the firmware-preloaded `ffi` module
 │   │   └── manifest.json   # Moddable module manifest
 │   └── pkjs/               # PebbleKit JS (phone side: settings + weather + HA)
@@ -317,8 +302,7 @@ How it works — reading the real backlight state:
 ```
 
 `src/embeddedjs/main.ts` is intentionally tiny — it only wires runtime events
-(AppMessage, minute change, connection change) to a redraw and hands the
-show-seconds wake controller (`wake.ts`) its redraw callback. Rendering is split
+(AppMessage, minute change, connection change) to a redraw. Rendering is split
 across `draw/` (Casita, badges, frame composition), shared graphics primitives
 live in `gfx.ts`, persisted preferences and health/weather reads in
 `data/settings.ts`, and all the branch-y "which face / what string" logic lives

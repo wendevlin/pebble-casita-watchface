@@ -10,9 +10,6 @@ if (themeSelect) themeSelect.value = CFG.theme || 'auto';
   var el = form.querySelector('input[name=' + key + ']');
   if (el) el.checked = !!CFG[key];
 });
-var secondsInput = form.querySelector('input[name=seconds]');
-if (secondsInput) secondsInput.checked = !!CFG.seconds;
-
 // The home-temperature badge only exists when HA is connected AND a sensor
 // is chosen (draft state). Its <li> is hidden until updateHomeBadge() shows
 // it, and badgeItems() ignores hidden badges so a hidden home badge never
@@ -318,7 +315,6 @@ form.addEventListener('submit', function (e) {
     battery: form.querySelector('input[name=battery]').checked,
     home: form.querySelector('input[name=home]').checked,
     order: badgeItems().map(function (li) { return li.getAttribute('data-badge'); }),
-    seconds: form.querySelector('input[name=seconds]').checked,
     haConnected: connectedDraft,
     haSensor: selectedSensor
   };
