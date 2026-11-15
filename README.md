@@ -5,10 +5,10 @@ A Pebble watchface that shows the [Home Assistant](https://www.home-assistant.io
 When the watch loses its Bluetooth link to the phone, Casita switches to a
 "disconnected" expression.
 
-It is written in **TypeScript**, rendered with the new Pebble **Alloy / Moddable
-JS SDK** (`commodetto/Poco`), and orchestrated with **Bun** via **Mise**. Artwork
-ships as **Pebble Draw Command** (`.pdc`) vector images generated from SVG by a
-self-contained Python converter.
+The watch side is native **C** (Pebble SDK); the phone side (settings page,
+weather, Home Assistant) is **TypeScript** running in PebbleKit JS. Builds are
+orchestrated with **Bun** via **Mise**. Artwork ships as **Pebble Draw Command**
+(`.pdc`) vector images generated from SVG by a self-contained Python converter.
 
 ## Screenshots
 
