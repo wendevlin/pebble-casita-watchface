@@ -20,14 +20,11 @@ jobs:
       - name: Render config template
         run: bun run render-config
 
-      - name: Generate resource IDs
-        run: bun run render-resources
-
       - name: Typecheck
         run: bun run typecheck
 
       - name: Run tests
-        run: bun test
+        run: bun run test
 
   build:
     name: Build .pbw
@@ -45,7 +42,8 @@ jobs:
       - run: bun install
 
       - name: Install pebble-tool
-        run: pip install pebble-tool
+        # pebble-tool manages the SDK virtualenv with uv.
+        run: pip install uv pebble-tool
 
       - name: Install Pebble SDK
         run: |

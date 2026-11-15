@@ -59,7 +59,7 @@ interface Config {
   view: string;
 }
 
-// Badge order (mirrors src/embeddedjs/logic.ts): the order is persisted/sent as
+// Badge order (mirrors parse_badge_order in src/c/logic.c): the order is persisted/sent as
 // the compact code string "dwsb" (date/weather/steps/battery). Kept as a tiny
 // local copy so the phone bundle stays self-contained (it can't import the
 // watch modules).
@@ -121,7 +121,8 @@ function currentTheme(): string {
     : "auto";
 }
 
-// Mirror of logic.ts themeToCode: 0 = light, 1 = dark, 2 = auto.
+// Theme code sent to the watch (theme_from_code in src/c/logic.c):
+// 0 = light, 1 = dark, 2 = auto.
 function themeCode(theme: string): number {
   if (theme === "auto") return 2;
   return theme === "dark" ? 1 : 0;
@@ -487,27 +488,43 @@ function refreshHomeTemp(): void {
   }
 }
 
+// Automatic refreshes closer together than this are skipped. The watchface
+// (and with it this script) restarts every time the user comes back from the
+// launcher, the timeline or another app, and the watch also asks for a refresh
+// when Bluetooth reconnects — without a floor each of those would cost a GPS
+// fix, two HTTP requests and up to three AppMessages that wake the watch. The
+// watch's own 30-minute cadence is well above it.
+const MIN_AUTO_REFRESH_MS = 10 * 60 * 1000;
+
 /** Everything the watch cannot fetch itself: weather + sun times + HA reading. */
-function refreshAll(): void {
+function refreshAll(force: boolean): void {
+  const now = Date.now();
+  const last = parseInt(localStorage.getItem("lastRefreshAt") || "0", 10);
+  if (!force && !isNaN(last) && now - last >= 0 && now - last < MIN_AUTO_REFRESH_MS) {
+    console.log("Casita: refresh skipped, last one " + Math.round((now - last) / 1000) + " s ago");
+    return;
+  }
+  localStorage.setItem("lastRefreshAt", String(now));
   fetchWeather();
   refreshHomeTemp();
 }
 
-// One fetch on launch; from then on the WATCH sets the pace by sending REFRESH
-// every 30 minutes (and on reconnect). There is deliberately no phone-side
-// timer: it would stall whenever the mobile app is frozen in the background,
-// and while the app is awake it would only double the traffic — every extra
-// refresh is an AppMessage that wakes the watch.
+// On launch the settings go out (the watch ignores unchanged values) and the
+// data is refreshed only if it is stale; from then on the WATCH sets the pace
+// by sending REFRESH every 30 minutes (and on reconnect). There is deliberately
+// no phone-side timer: it would stall whenever the mobile app is frozen in the
+// background, and while the app is awake it would only double the traffic —
+// every extra refresh is an AppMessage that wakes the watch.
 Pebble.addEventListener("ready", function () {
   sendSettings();
-  refreshAll();
+  refreshAll(false);
 });
 
 Pebble.addEventListener("appmessage", function (e) {
   const payload = e && e.payload;
   if (payload && payload.REFRESH !== undefined) {
     console.log("Casita: refresh requested by the watch");
-    refreshAll();
+    refreshAll(false);
   }
 });
 
@@ -795,5 +812,5 @@ Pebble.addEventListener("webviewclosed", function (e) {
   }
   sendSettings();
   // Pull fresh values for whatever was just (re)configured.
-  refreshAll();
+  refreshAll(true);
 });

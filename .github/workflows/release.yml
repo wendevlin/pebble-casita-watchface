@@ -20,7 +20,8 @@ jobs:
       - run: bun install
 
       - name: Install pebble-tool
-        run: pip install pebble-tool
+        # pebble-tool manages the SDK virtualenv with uv.
+        run: pip install uv pebble-tool
 
       - name: Install Pebble SDK
         run: |
