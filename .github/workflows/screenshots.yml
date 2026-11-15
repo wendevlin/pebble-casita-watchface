@@ -3,8 +3,6 @@ name: Emulator screenshots
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: ["ccr-*"]
   workflow_dispatch:
 
 jobs:
@@ -49,15 +47,6 @@ jobs:
           export DISPLAY=:99
           sleep 2
           bash tools/emulator-screenshots.sh ${{ matrix.platform }} screenshots
-
-      - name: Print screenshots (base64)
-        if: always()
-        run: |
-          for f in screenshots/*.png; do
-            echo "=== $f"
-            base64 -w0 "$f"
-            echo
-          done
 
       - name: Upload screenshots
         if: always()
