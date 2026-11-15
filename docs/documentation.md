@@ -241,6 +241,11 @@ Each badge is a rounded pill with an
   tenths of a degree Celsius via the `WEATHER_TEMP` key. The last successful
   position is remembered, so when the phone refuses a fresh fix in the
   background the weather is still updated for the last known place.
+- **Stale readings:** the watch records when each temperature (weather and
+  Home Assistant) arrived. A reading older than **1 hour** — the phone is out
+  of range, or refreshes keep failing — shows as `--` (the badge stays so the
+  layout doesn't jump) and no longer triggers the sweating face. The next
+  reading restores it immediately.
 - **Units (°C/°F)** are decided on the watch from
   `health_service_get_measurement_system_for_display()` (walked distance),
   which mirrors the Pebble app's *units* setting (imperial → °F, otherwise °C).

@@ -19,6 +19,12 @@ Expression expression_for_hour(int hour) {
   return EXPR_SLEEPING;
 }
 
+int fresh_reading(int tenths_c, int32_t received_at, int32_t now) {
+  if (received_at <= 0) return WEATHER_UNKNOWN;
+  if (now - received_at > READING_MAX_AGE_S) return WEATHER_UNKNOWN;
+  return tenths_c;
+}
+
 bool is_sweating_temp(int tenths_c) {
   return tenths_c > WEATHER_UNKNOWN && tenths_c >= SWEATING_TEMP_TENTHS;
 }

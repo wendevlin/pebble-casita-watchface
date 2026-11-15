@@ -62,6 +62,18 @@ static void test_expressions(void) {
   CHECK(pick_expression(true, WEATHER_UNKNOWN, 3) == EXPR_SLEEPING);
 }
 
+static void test_freshness(void) {
+  const int32_t t = 1700000000;
+  CHECK(fresh_reading(215, t, t) == 215);
+  CHECK(fresh_reading(215, t, t + READING_MAX_AGE_S) == 215);  // exactly 1 h: still fresh
+  CHECK(fresh_reading(215, t, t + READING_MAX_AGE_S + 1) == WEATHER_UNKNOWN);
+  CHECK(fresh_reading(215, 0, t) == WEATHER_UNKNOWN);  // never received
+  CHECK(fresh_reading(215, t, t - 600) == 215);        // clock set back
+  CHECK(fresh_reading(WEATHER_UNKNOWN, t, t) == WEATHER_UNKNOWN);
+  // A stale hot reading no longer makes Casita sweat.
+  CHECK(!is_sweating_temp(fresh_reading(350, t, t + 2 * READING_MAX_AGE_S)));
+}
+
 static void test_time(void) {
   char buf[8];
   format_time(buf, sizeof(buf), 7, 5, false);
@@ -271,6 +283,7 @@ static void test_layout(void) {
 
 int main(void) {
   test_expressions();
+  test_freshness();
   test_time();
   test_theme();
   test_badge_text();

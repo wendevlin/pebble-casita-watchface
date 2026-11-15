@@ -65,6 +65,8 @@ enum {
   PERSIST_HOME_TEMP,
   PERSIST_SUNRISE,
   PERSIST_SUNSET,
+  PERSIST_WEATHER_AT,  // when WEATHER_TEMP last arrived (unix time)
+  PERSIST_HOME_AT,     // when HA_TEMP last arrived (unix time)
 };
 
 // Ask the phone to re-fetch weather, sun times and the Home Assistant reading
@@ -85,8 +87,10 @@ typedef struct {
   bool show_battery;
   bool show_home_temp;
   BadgeId badge_order[BADGE_COUNT];
-  int weather_temp;  // tenths °C, WEATHER_UNKNOWN = none yet
-  int home_temp;     // tenths °C, WEATHER_UNKNOWN = none yet
+  int weather_temp;    // tenths °C, WEATHER_UNKNOWN = none yet
+  int home_temp;       // tenths °C, WEATHER_UNKNOWN = none yet
+  int32_t weather_at;  // when weather_temp arrived; older than 1 h shows "--"
+  int32_t home_at;     // when home_temp arrived; same rule
   int sunrise_min;   // minutes since local midnight, SUN_UNKNOWN = none yet
   int sunset_min;
 } Settings;
@@ -153,6 +157,8 @@ static void settings_load(void) {
   s_settings.show_home_temp = persist_read_bool_or(PERSIST_SHOW_HOME_TEMP, true);
   s_settings.weather_temp = persist_read_int_or(PERSIST_WEATHER_TEMP, WEATHER_UNKNOWN);
   s_settings.home_temp = persist_read_int_or(PERSIST_HOME_TEMP, WEATHER_UNKNOWN);
+  s_settings.weather_at = persist_read_int_or(PERSIST_WEATHER_AT, 0);
+  s_settings.home_at = persist_read_int_or(PERSIST_HOME_AT, 0);
   s_settings.sunrise_min = persist_read_int_or(PERSIST_SUNRISE, SUN_UNKNOWN);
   s_settings.sunset_min = persist_read_int_or(PERSIST_SUNSET, SUN_UNKNOWN);
 
@@ -212,6 +218,26 @@ static bool apply_int(DictionaryIterator *it, uint32_t key, uint32_t persist_key
   return true;
 }
 
+// A temperature reading also records when it arrived, so a stale value can be
+// hidden (fresh_reading). The timestamp is written on every reading; the value
+// only when it changed. Redraw when the value changed or was stale before.
+static bool apply_reading(DictionaryIterator *it, uint32_t key, uint32_t persist_key,
+                          uint32_t persist_at_key, int *field, int32_t *at) {
+  Tuple *t = dict_find(it, key);
+  if (!t) return false;
+  const int32_t now = (int32_t)time(NULL);
+  const int value = tuple_int(t);
+  const bool was_fresh = fresh_reading(*field, *at, now) != WEATHER_UNKNOWN;
+  const bool changed = value != *field || !was_fresh;
+  if (value != *field) {
+    *field = value;
+    persist_write_int(persist_key, value);
+  }
+  *at = now;
+  persist_write_int(persist_at_key, now);
+  return changed;
+}
+
 static void inbox_received(DictionaryIterator *it, void *context) {
   bool changed = false;
   Tuple *t = dict_find(it, MESSAGE_KEY_THEME);
@@ -243,9 +269,10 @@ static void inbox_received(DictionaryIterator *it, void *context) {
                           &s_settings.show_battery);
   changed |= apply_toggle(it, MESSAGE_KEY_SHOW_HOME_TEMP, PERSIST_SHOW_HOME_TEMP,
                           &s_settings.show_home_temp);
-  changed |= apply_int(it, MESSAGE_KEY_WEATHER_TEMP, PERSIST_WEATHER_TEMP,
-                       &s_settings.weather_temp);
-  changed |= apply_int(it, MESSAGE_KEY_HA_TEMP, PERSIST_HOME_TEMP, &s_settings.home_temp);
+  changed |= apply_reading(it, MESSAGE_KEY_WEATHER_TEMP, PERSIST_WEATHER_TEMP,
+                           PERSIST_WEATHER_AT, &s_settings.weather_temp, &s_settings.weather_at);
+  changed |= apply_reading(it, MESSAGE_KEY_HA_TEMP, PERSIST_HOME_TEMP, PERSIST_HOME_AT,
+                           &s_settings.home_temp, &s_settings.home_at);
   changed |= apply_int(it, MESSAGE_KEY_SUNRISE, PERSIST_SUNRISE, &s_settings.sunrise_min);
   changed |= apply_int(it, MESSAGE_KEY_SUNSET, PERSIST_SUNSET, &s_settings.sunset_min);
 
@@ -417,8 +444,9 @@ typedef struct {
   char text[12];
 } Badge;
 
-// Builds the visible badges, in priority order. Returns how many.
-static int build_badges(const struct tm *now, Badge *badges) {
+// Builds the visible badges, in priority order. Returns how many. `weather`
+// and `home` are the readings after the freshness check (fresh_reading).
+static int build_badges(const struct tm *now, int weather, int home, Badge *badges) {
   int n = 0;
   for (int i = 0; i < BADGE_COUNT; i++) {
     Badge *b = &badges[n];
@@ -432,7 +460,7 @@ static int build_badges(const struct tm *now, Badge *badges) {
       case BADGE_WEATHER:
         if (!s_settings.show_weather) break;
         b->icon = ICON_THERMOMETER;
-        format_temperature(b->text, sizeof(b->text), s_settings.weather_temp, use_fahrenheit());
+        format_temperature(b->text, sizeof(b->text), weather, use_fahrenheit());
         n++;
         break;
       case BADGE_STEPS: {
@@ -453,10 +481,11 @@ static int build_badges(const struct tm *now, Badge *badges) {
         break;
       }
       case BADGE_HOME:
-        // Only once the phone has pushed a Home Assistant reading.
+        // Only once the phone has pushed a Home Assistant reading; a stale one
+        // keeps the badge (so the layout doesn't jump) but shows "--".
         if (!s_settings.show_home_temp || s_settings.home_temp == WEATHER_UNKNOWN) break;
         b->icon = ICON_HOME_THERMOMETER;
-        format_temperature(b->text, sizeof(b->text), s_settings.home_temp, use_fahrenheit());
+        format_temperature(b->text, sizeof(b->text), home, use_fahrenheit());
         n++;
         break;
       default:
@@ -522,9 +551,9 @@ static void draw_pill(GContext *ctx, int x, int y, int width, const Badge *badge
  * corners (sleeping, disconnected) reserve every row instead.
  */
 static int draw_badges(GContext *ctx, GRect area, const Palette *pal, const struct tm *now,
-                       Expression expr) {
+                       int weather, int home, Expression expr) {
   Badge badges[MAX_BADGES];
-  const int count = build_badges(now, badges);
+  const int count = build_badges(now, weather, home, badges);
   if (count == 0) return 0;
 
   int widths[MAX_BADGES];
@@ -567,8 +596,12 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   const bool dark = theme_is_dark(s_settings.theme, hour * 60 + minute, s_settings.sunrise_min,
                                   s_settings.sunset_min);
   const Palette pal = palette_for(dark);
-  const Expression expr = pick_expression(connection_service_peek_pebble_app_connection(),
-                                          s_settings.weather_temp, hour);
+  // Readings older than an hour (phone away, refreshes failing) show as "--"
+  // and no longer drive the sweating face.
+  const int weather = fresh_reading(s_settings.weather_temp, s_settings.weather_at, (int32_t)t);
+  const int home = fresh_reading(s_settings.home_temp, s_settings.home_at, (int32_t)t);
+  const Expression expr =
+      pick_expression(connection_service_peek_pebble_app_connection(), weather, hour);
 
   // Lay out inside the unobstructed area so the face shrinks for Quick View.
   const GRect bounds = layer_get_bounds(layer);
@@ -578,7 +611,7 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   graphics_context_set_fill_color(ctx, pal.background);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
 
-  const int band = draw_badges(ctx, area, &pal, now, expr);
+  const int band = draw_badges(ctx, area, &pal, now, weather, home, expr);
 
   // Clock, centred at the bottom of the free area.
   char time_text[8];

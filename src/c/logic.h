@@ -51,6 +51,17 @@ typedef enum {
  */
 Expression expression_for_hour(int hour);
 
+/** Readings older than this (seconds) are treated as unknown. */
+#define READING_MAX_AGE_S (60 * 60)
+
+/**
+ * Returns `tenths_c` while the reading is fresh, else WEATHER_UNKNOWN: when it
+ * was never received (`received_at` <= 0) or is older than READING_MAX_AGE_S.
+ * A reading from the "future" (the clock was set back) counts as fresh; the
+ * next refresh replaces it anyway.
+ */
+int fresh_reading(int tenths_c, int32_t received_at, int32_t now);
+
 /** True when a known reading is hot enough (>= 30 °C) for the sweating face. */
 bool is_sweating_temp(int tenths_c);
 
