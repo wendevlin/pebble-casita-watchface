@@ -6,10 +6,11 @@
  * (date / weather / steps / battery / home temperature) along the top.
  *
  * Everything is drawn by one Layer update proc. The face only wakes up for:
- *   - the minute tick (MINUTE_UNIT — never seconds),
+ *   - the minute tick (MINUTE_UNIT — never seconds), which also refreshes the
+ *     battery and steps badges,
  *   - phone connect/disconnect (switches to the disconnected expression),
- *   - battery state changes,
- *   - inbound AppMessages (settings, weather, Home Assistant reading).
+ *   - inbound AppMessages (settings, weather, Home Assistant reading); these
+ *     only touch flash and redraw when a value actually changed.
  * The unobstructed area (timeline Quick View) triggers redraws by itself.
  *
  * Pure logic (expression choice, formatting, badge layout) is in logic.c and
@@ -71,6 +72,10 @@ enum {
 // phone has no timer of its own (PebbleKit JS stalls in the background), so
 // the watch sets the pace.
 #define REFRESH_EVERY_MIN 30
+// A Bluetooth link that flaps (phone at the edge of range) reconnects over and
+// over; each reconnect would otherwise trigger a full phone-side refresh and
+// several AppMessages. Reconnect refreshes are skipped within this window.
+#define RECONNECT_REFRESH_MIN_GAP_S (10 * 60)
 
 typedef struct {
   Theme theme;
@@ -183,53 +188,82 @@ static int tuple_int(const Tuple *t) {
   }
 }
 
-static void apply_toggle(DictionaryIterator *it, uint32_t key, uint32_t persist_key, bool *field) {
+// The phone re-sends the full settings dictionary on every launch, and most
+// values are unchanged. Each helper writes flash only when the value differs
+// and reports whether anything changed, so an unchanged message costs no flash
+// write and no redraw.
+static bool apply_toggle(DictionaryIterator *it, uint32_t key, uint32_t persist_key, bool *field) {
   Tuple *t = dict_find(it, key);
-  if (!t) return;
-  *field = tuple_int(t) != 0;
-  persist_write_bool(persist_key, *field);
+  if (!t) return false;
+  const bool value = tuple_int(t) != 0;
+  if (value == *field) return false;
+  *field = value;
+  persist_write_bool(persist_key, value);
+  return true;
 }
 
-static void apply_int(DictionaryIterator *it, uint32_t key, uint32_t persist_key, int *field) {
+static bool apply_int(DictionaryIterator *it, uint32_t key, uint32_t persist_key, int *field) {
   Tuple *t = dict_find(it, key);
-  if (!t) return;
-  *field = tuple_int(t);
-  persist_write_int(persist_key, *field);
+  if (!t) return false;
+  const int value = tuple_int(t);
+  if (value == *field) return false;
+  *field = value;
+  persist_write_int(persist_key, value);
+  return true;
 }
 
 static void inbox_received(DictionaryIterator *it, void *context) {
+  bool changed = false;
   Tuple *t = dict_find(it, MESSAGE_KEY_THEME);
   if (t) {
-    s_settings.theme = theme_from_code(tuple_int(t));
-    persist_write_int(PERSIST_THEME, s_settings.theme);
+    const Theme theme = theme_from_code(tuple_int(t));
+    if (theme != s_settings.theme) {
+      s_settings.theme = theme;
+      persist_write_int(PERSIST_THEME, theme);
+      changed = true;
+    }
   }
   t = dict_find(it, MESSAGE_KEY_BADGE_ORDER);
   if (t && t->type == TUPLE_CSTRING) {
-    parse_badge_order(t->value->cstring, s_settings.badge_order);
-    char code[BADGE_COUNT + 1];
-    badge_order_to_code(s_settings.badge_order, code);
-    persist_write_string(PERSIST_BADGE_ORDER, code);
+    BadgeId order[BADGE_COUNT];
+    parse_badge_order(t->value->cstring, order);
+    if (memcmp(order, s_settings.badge_order, sizeof(order)) != 0) {
+      memcpy(s_settings.badge_order, order, sizeof(order));
+      char code[BADGE_COUNT + 1];
+      badge_order_to_code(order, code);
+      persist_write_string(PERSIST_BADGE_ORDER, code);
+      changed = true;
+    }
   }
-  apply_toggle(it, MESSAGE_KEY_SHOW_WEATHER, PERSIST_SHOW_WEATHER, &s_settings.show_weather);
-  apply_toggle(it, MESSAGE_KEY_SHOW_STEPS, PERSIST_SHOW_STEPS, &s_settings.show_steps);
-  apply_toggle(it, MESSAGE_KEY_SHOW_DATE, PERSIST_SHOW_DATE, &s_settings.show_date);
-  apply_toggle(it, MESSAGE_KEY_SHOW_BATTERY, PERSIST_SHOW_BATTERY, &s_settings.show_battery);
-  apply_toggle(it, MESSAGE_KEY_SHOW_HOME_TEMP, PERSIST_SHOW_HOME_TEMP,
-               &s_settings.show_home_temp);
-  apply_int(it, MESSAGE_KEY_WEATHER_TEMP, PERSIST_WEATHER_TEMP, &s_settings.weather_temp);
-  apply_int(it, MESSAGE_KEY_HA_TEMP, PERSIST_HOME_TEMP, &s_settings.home_temp);
-  apply_int(it, MESSAGE_KEY_SUNRISE, PERSIST_SUNRISE, &s_settings.sunrise_min);
-  apply_int(it, MESSAGE_KEY_SUNSET, PERSIST_SUNSET, &s_settings.sunset_min);
+  changed |= apply_toggle(it, MESSAGE_KEY_SHOW_WEATHER, PERSIST_SHOW_WEATHER,
+                          &s_settings.show_weather);
+  changed |= apply_toggle(it, MESSAGE_KEY_SHOW_STEPS, PERSIST_SHOW_STEPS, &s_settings.show_steps);
+  changed |= apply_toggle(it, MESSAGE_KEY_SHOW_DATE, PERSIST_SHOW_DATE, &s_settings.show_date);
+  changed |= apply_toggle(it, MESSAGE_KEY_SHOW_BATTERY, PERSIST_SHOW_BATTERY,
+                          &s_settings.show_battery);
+  changed |= apply_toggle(it, MESSAGE_KEY_SHOW_HOME_TEMP, PERSIST_SHOW_HOME_TEMP,
+                          &s_settings.show_home_temp);
+  changed |= apply_int(it, MESSAGE_KEY_WEATHER_TEMP, PERSIST_WEATHER_TEMP,
+                       &s_settings.weather_temp);
+  changed |= apply_int(it, MESSAGE_KEY_HA_TEMP, PERSIST_HOME_TEMP, &s_settings.home_temp);
+  changed |= apply_int(it, MESSAGE_KEY_SUNRISE, PERSIST_SUNRISE, &s_settings.sunrise_min);
+  changed |= apply_int(it, MESSAGE_KEY_SUNSET, PERSIST_SUNSET, &s_settings.sunset_min);
 
-  if (s_canvas) layer_mark_dirty(s_canvas);
+  if (changed && s_canvas) layer_mark_dirty(s_canvas);
 }
 
-static void request_refresh(void) {
+static time_t s_last_refresh;
+
+static void request_refresh(bool periodic) {
   if (!connection_service_peek_pebble_app_connection()) return;
+  const time_t now = time(NULL);
+  if (!periodic && s_last_refresh != 0 && now - s_last_refresh < RECONNECT_REFRESH_MIN_GAP_S) {
+    return;
+  }
   DictionaryIterator *out;
   if (app_message_outbox_begin(&out) != APP_MSG_OK) return;  // busy: next interval retries
   dict_write_uint8(out, MESSAGE_KEY_REFRESH, 1);
-  app_message_outbox_send();
+  if (app_message_outbox_send() == APP_MSG_OK) s_last_refresh = now;
 }
 
 // --------------------------------------------------------------------------- //
@@ -577,16 +611,12 @@ static void canvas_update(Layer *layer, GContext *ctx) {
 
 static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
   layer_mark_dirty(s_canvas);
-  if (tick_time->tm_min % REFRESH_EVERY_MIN == 0) request_refresh();
+  if (tick_time->tm_min % REFRESH_EVERY_MIN == 0) request_refresh(true);
 }
 
 static void app_connection_handler(bool connected) {
   layer_mark_dirty(s_canvas);
-  if (connected) request_refresh();
-}
-
-static void battery_handler(BatteryChargeState state) {
-  layer_mark_dirty(s_canvas);
+  if (connected) request_refresh(false);
 }
 
 // --------------------------------------------------------------------------- //
@@ -622,7 +652,6 @@ static void init(void) {
   connection_service_subscribe((ConnectionHandlers){
       .pebble_app_connection_handler = app_connection_handler,
   });
-  battery_state_service_subscribe(battery_handler);
 
   // Register before opening. The largest inbound message is the settings
   // dictionary (~100 bytes); the outbox only carries the REFRESH request.
@@ -633,7 +662,6 @@ static void init(void) {
 static void deinit(void) {
   tick_timer_service_unsubscribe();
   connection_service_unsubscribe();
-  battery_state_service_unsubscribe();
   app_message_deregister_callbacks();
   window_destroy(s_window);
 

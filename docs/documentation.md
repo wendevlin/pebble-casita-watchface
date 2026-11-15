@@ -176,12 +176,19 @@ inbound AppMessage does wake the JS, so:
 - `main.c` sends `REFRESH` from its minute tick whenever the minute of the
   hour is a multiple of 30, and once more whenever the phone link comes back
   (after a night in airplane mode, say). The send is skipped while disconnected
-  and any outbox error is ignored — the next interval retries.
+  and any outbox error is ignored — the next interval retries. Reconnect
+  requests are skipped within 10 minutes of the last one, so a flapping
+  Bluetooth link doesn't trigger a refresh per reconnect.
 - `index.ts` handles that message by calling `refreshAll()`: the Open-Meteo
   fetch (weather + sunrise/sunset) and the HA sensor GET. The same function runs
-  once on launch and on Save. There is deliberately no phone-side timer: it
-  would stall in the background anyway, and while the app is awake it would only
-  double the traffic against the watch's own cadence.
+  on launch and on Save. Automatic refreshes (launch, `REFRESH`) closer than
+  10 minutes to the previous one are skipped: the watchface — and with it the
+  phone script — restarts every time the user comes back from the launcher or
+  the timeline, and each refresh costs a GPS fix, two HTTP requests and up to
+  three AppMessages that wake the watch. Save always refreshes. There is
+  deliberately no phone-side timer: it would stall in the background anyway,
+  and while the app is awake it would only double the traffic against the
+  watch's own cadence.
 - **Phone → watch pushes are serialised.** Two pushes sent back to back can
   silently drop the first (observed in the emulator: weather lost behind the
   sun times).
@@ -243,8 +250,7 @@ Each badge is a rounded pill with an
   `health_service_sum_today(HealthMetricStepCount)` and refresh every minute. If
   Health is unavailable (no permission / unsupported) the badge is hidden.
 - **Battery** is the watch's own charge level (`battery_state_service_peek()`,
-  redrawn when the battery service reports a change), shown as a whole
-  percent. Its icon is colour-coded by level: green at ≥ 70%, orange at
+  read on every minute redraw), shown as a whole percent. Its icon is colour-coded by level: green at ≥ 70%, orange at
   ≥ 30%, red below 30% (three pre-tinted PDC variants generated from the one
   `battery.svg`). The tints are the fully saturated palette entries
   `GColorGreen` (`#00ff00`), `GColorChromeYellow` (`#ff9800` → 255,170,0) and
@@ -282,8 +288,11 @@ paths* (13.3 fixed point, 1/8 px) for smoother anti-aliased curves.
 ## Battery life
 
 The watch side is plain C with no JavaScript VM on the watch. It only wakes for
-the minute tick (`MINUTE_UNIT`), phone connect/disconnect, battery changes and
-inbound AppMessages, and each wake is a single layer redraw. The face
+the minute tick (`MINUTE_UNIT`, which also refreshes the battery and steps
+badges — there is no separate battery subscription), phone connect/disconnect
+and inbound AppMessages. Each wake is at most one layer redraw, and an
+AppMessage whose values are unchanged (the phone re-sends all settings on every
+launch) causes neither a flash write nor a redraw. The face
 deliberately does no per-second work: an earlier *show seconds while the
 backlight is lit* feature was removed because waking 60 times a minute is the
 largest avoidable drain a watchface can have.
