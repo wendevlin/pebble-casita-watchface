@@ -17,7 +17,21 @@ mkdir -p "$out"
 emu=(--emulator "$platform")
 pbw=$(ls build/*.pbw | head -n 1)
 
-msg() { pebble send-app-message "${emu[@]}" "$@" >/dev/null; }
+# `pebble build` numbers the package.json messageKeys from 10000 in order;
+# send-app-message only takes those numbers, so map NAME=VALUE -> 100xx=VALUE.
+declare -A KEY
+i=10000
+for name in $(python3 -c 'import json; print(" ".join(json.load(open("package.json"))["pebble"]["messageKeys"]))'); do
+  KEY[$name]=$i
+  i=$((i + 1))
+done
+msg() {
+  local args=() a
+  for a in "$@"; do
+    if [[ "$a" == *=* ]]; then args+=("${KEY[${a%%=*}]:?unknown key ${a%%=*}}=${a#*=}"); else args+=("$a"); fi
+  done
+  pebble send-app-message "${emu[@]}" "${args[@]}" >/dev/null
+}
 shot() {
   sleep 2
   pebble screenshot --no-open "${emu[@]}" "$out/${platform}-$1.png" >/dev/null
