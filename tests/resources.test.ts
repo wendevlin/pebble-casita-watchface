@@ -4,17 +4,19 @@ import { resolve } from "node:path";
 import pkg from "../package.json";
 
 /*
- * Guards the generated PDC resources (`bun run resources`, run by `bun run
- * test` first) against the watch code:
- *  - every raw resource declared in package.json exists and is a PDC image,
- *  - every draw command is a precise path (1/8 px, anti-aliased on the watch),
- *  - the badge icons are generated at exactly ICON_SIZE from src/c/main.c, so
- *    the watch draws them 1:1 and never rescales them.
+ * Guards the generated resources (`bun run resources`, run by `bun run test`
+ * first) against the watch code:
+ *  - every resource declared in package.json exists,
+ *  - the Casita PDCs use only precise paths (1/8 px, anti-aliased on the watch),
+ *  - the badge icons are RGBA PNGs of exactly ICON_SIZE from src/c/main.c, so
+ *    the watch blits them 1:1 and never rescales them,
+ *  - main.c maps every declared resource.
  */
 
 const root = resolve(import.meta.dir, "..");
 const media: { type: string; name: string; file: string }[] = pkg.pebble.resources.media;
 const raw = media.filter((m) => m.type === "raw");
+const icons = media.filter((m) => m.name.startsWith("ICON_"));
 
 const PRECISE_PATH = 3;
 
@@ -44,9 +46,9 @@ function readPdc(file: string): Pdc {
 const mainC = readFileSync(resolve(root, "src/c/main.c"), "utf8");
 const iconSize = Number(/#define ICON_SIZE (\d+)/.exec(mainC)?.[1]);
 
-describe("PDC resources", () => {
-  test("every raw resource exists", () => {
-    for (const m of raw) {
+describe("Watch resources", () => {
+  test("every declared resource exists", () => {
+    for (const m of media) {
       expect(existsSync(resolve(root, "resources", m.file)), m.file).toBe(true);
     }
   });
@@ -59,15 +61,22 @@ describe("PDC resources", () => {
     }
   });
 
-  test("badge icons are generated at ICON_SIZE", () => {
+  test("badge icons are RGBA PNG bitmaps of ICON_SIZE", () => {
     expect(iconSize).toBeGreaterThan(0);
-    for (const m of raw.filter((r) => r.name.startsWith("ICON_"))) {
-      const pdc = readPdc(m.file);
-      expect(Math.max(pdc.width, pdc.height), m.file).toBe(iconSize);
+    expect(icons.length).toBeGreaterThan(0);
+    for (const m of icons) {
+      expect(m.type, m.name).toBe("bitmap");
+      const png = readFileSync(resolve(root, "resources", m.file));
+      expect(png.subarray(1, 4).toString("latin1"), m.file).toBe("PNG");
+      expect(png.readUInt32BE(16), m.file).toBe(iconSize); // IHDR width
+      expect(png.readUInt32BE(20), m.file).toBe(iconSize); // IHDR height
+      expect(png.readUInt8(25), m.file).toBe(6); // colour type: RGBA
     }
   });
 
   test("main.c maps every declared resource", () => {
-    for (const m of raw) expect(mainC, m.name).toContain(`RESOURCE_ID_${m.name}`);
+    for (const m of media.filter((r) => r.name !== "APP_ICON")) {
+      expect(mainC, m.name).toContain(`RESOURCE_ID_${m.name}`);
+    }
   });
 });

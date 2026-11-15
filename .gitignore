@@ -5,9 +5,9 @@ build/
 # Waf build lock
 .lock-waf_*
 
-# Generated PDC resources (regenerate with `bun run resources`)
+# Generated PDC/PNG resources (regenerate with `bun run resources`)
 resources/casita/*.pdc
-resources/icons/*.pdc
+resources/icons/*.png
 
 # Generated PebbleKit JS (transpiled from src/pkjs/index.ts by `bun run build:pkjs`)
 src/pkjs/index.js

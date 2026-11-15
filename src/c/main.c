@@ -23,8 +23,8 @@
 // Geometry (pixels)
 // --------------------------------------------------------------------------- //
 
-// The badge icons are generated at exactly this size (tools/build-pdc.ts), so
-// they are drawn 1:1 with sub-pixel (precise) coordinates and never rescaled.
+// The badge icons are rasterized at exactly this size with anti-aliased alpha
+// (tools/build-resources.ts), so they are blitted 1:1 and never rescaled.
 #define ICON_SIZE 20
 #define PILL_PAD_X 6
 #define PILL_PAD_Y 5
@@ -114,8 +114,8 @@ static const uint32_t ICON_RESOURCES[ICON_COUNT] = {
     [ICON_HOME_THERMOMETER] = RESOURCE_ID_ICON_HOME_THERMOMETER,
 };
 
-// Badge icons are tiny; each is loaded on first use and kept.
-static GDrawCommandImage *s_icons[ICON_COUNT];
+// Badge icons are tiny bitmaps; each is loaded on first use and kept.
+static GBitmap *s_icons[ICON_COUNT];
 
 // Casita: one full-size image (the expression changes a few times a day) and
 // one down-scaled clone for when the Quick View shrinks the free space.
@@ -300,8 +300,8 @@ static Palette palette_for(bool dark) {
 // Images
 // --------------------------------------------------------------------------- //
 
-static GDrawCommandImage *icon_image(IconKind kind) {
-  if (!s_icons[kind]) s_icons[kind] = gdraw_command_image_create_with_resource(ICON_RESOURCES[kind]);
+static GBitmap *icon_image(IconKind kind) {
+  if (!s_icons[kind]) s_icons[kind] = gbitmap_create_with_resource(ICON_RESOURCES[kind]);
   return s_icons[kind];
 }
 
@@ -461,9 +461,13 @@ static void draw_pill(GContext *ctx, int x, int y, int width, const Badge *badge
   graphics_context_set_fill_color(ctx, pal->pill);
   fill_pill(ctx, GRect(x + BORDER_W, y + BORDER_W, width - BORDER_W * 2, PILL_H - BORDER_W * 2));
 
-  GDrawCommandImage *icon = icon_image(badge->icon);
+  GBitmap *icon = icon_image(badge->icon);
   if (icon) {
-    gdraw_command_image_draw(ctx, icon, GPoint(x + PILL_PAD_X, y + (PILL_H - ICON_SIZE) / 2));
+    // GCompOpSet blends the icon's alpha edges into the pill.
+    graphics_context_set_compositing_mode(ctx, GCompOpSet);
+    graphics_draw_bitmap_in_rect(
+        ctx, icon, GRect(x + PILL_PAD_X, y + (PILL_H - ICON_SIZE) / 2, ICON_SIZE, ICON_SIZE));
+    graphics_context_set_compositing_mode(ctx, GCompOpAssign);
   }
   graphics_context_set_text_color(ctx, pal->pill_text);
   const int text_x = x + PILL_PAD_X + ICON_SIZE + ICON_GAP;
@@ -632,7 +636,7 @@ static void deinit(void) {
   window_destroy(s_window);
 
   for (int i = 0; i < ICON_COUNT; i++) {
-    if (s_icons[i]) gdraw_command_image_destroy(s_icons[i]);
+    if (s_icons[i]) gbitmap_destroy(s_icons[i]);
   }
   if (s_casita) gdraw_command_image_destroy(s_casita);
   if (s_casita_scaled) gdraw_command_image_destroy(s_casita_scaled);

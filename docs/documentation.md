@@ -257,11 +257,11 @@ Each badge is a rounded pill with an
   phone on every refresh (see the Home Assistant section above) and sent in
   tenths of a degree Celsius via the `HA_TEMP` key. Like the weather badge it is displayed in °C/°F per the watch's
   own units setting, with the same text colour as the other badges, but its
-  **icon** is a distinct **deep-orange** (baked into the PDC) so it reads apart
+  **icon** is a distinct **deep-orange** (baked into the icon) so it reads apart
   from the blue Open-Meteo thermometer. The badge only appears when Home
   Assistant is connected, a sensor is chosen, and a reading has been received.
 
-The MDI icons are converted to PDC by the `resources` script (see below); the
+The MDI icons are rasterized to PNG by the `resources` script (see below); the
 sources live in `mdi-svgs/` with an accent fill baked in.
 
 **Colors** — the color Pebble renders only 2 bits per channel (64 colors), so
@@ -270,11 +270,14 @@ a `GColorLightGray` border (light theme), black background and pill fill with a
 `GColorDarkGray` border (dark theme). The pill fill matches the background on
 purpose — the badge is defined by its 2 px border.
 
-**Sharpness** — the badge icons are generated at exactly the size the watch
-draws them (`ICON_SIZE`, 20 px) and every PDC uses *precise paths* (13.3 fixed
-point, 1/8 px). The watch fills them with anti-aliasing 1:1, so curves and
-diagonals stay smooth. (The JS version scaled 24 px integer-point icons down at
-runtime, which rounded every vertex to a whole pixel and made them jagged.)
+**Sharpness** — the badge icons are rasterized offline at exactly the size the
+watch draws them (`ICON_SIZE`, 20 px) into PNGs with anti-aliased alpha, and the
+watch blits them 1:1 (`GCompOpSet`). That keeps holes (the calendar page, the
+thermometer channel) — which vector draw commands cannot express — and gives
+smooth edges. The JS version scaled 24 px integer-point PDC icons down at
+runtime, which rounded every vertex to a whole pixel and filled the holes in.
+Casita stays a vector PDC (it is scaled for the Quick View) with *precise
+paths* (13.3 fixed point, 1/8 px) for smoother anti-aliased curves.
 
 ## Battery life
 
@@ -309,8 +312,9 @@ largest avoidable drain a watchface can have.
 ├── tests/c/test_logic.c    # Host C unit tests for logic.c (`bun run test:c`)
 ├── tests/resources.test.ts # `bun test` guard: PDCs are precise, icons are ICON_SIZE
 ├── tests/ha.test.ts        # `bun test` unit tests for pkjs/ha.ts
-├── tools/svg2pdc.py        # Self-contained SVG -> PDC converter
-├── tools/build-pdc.ts      # Job table: which SVGs become which .pdc, in which tint/size
+├── tools/svg2pdc.py        # Self-contained SVG -> PDC converter (Casita)
+├── tools/svg2png.py        # Self-contained SVG -> anti-aliased PNG rasterizer (icons)
+├── tools/build-resources.ts # Job table: which SVGs become which .pdc/.png, in which tint
 ├── tools/render-config.ts  # Renders config.eta -> config-html.ts at build time
 ├── tools/emulator-screenshots.sh # Scripted emulator scenarios -> screenshots
 ├── tsconfig.pkjs.json      # Typecheck config for the phone code
@@ -343,7 +347,7 @@ All scripts run through Bun (`bun run <name>`):
 
 | Script              | What it does                                                        |
 | ------------------- | ------------------------------------------------------------------- |
-| `resources`         | Regenerate `resources/**/*.pdc` from the SVGs via the job table in `tools/build-pdc.ts`. |
+| `resources`         | Regenerate `resources/casita/*.pdc` and `resources/icons/*.png` from the SVGs via the job table in `tools/build-resources.ts`. |
 | `typecheck`         | `tsc` for the phone code (`tsconfig.pkjs.json`) and the build tools (`tsconfig.tools.json`). |
 | `test`              | `resources` + `bun test` (`ha.ts`, PDC guard) + `test:c`.            |
 | `test:c`            | Compile and run the host C unit tests for `src/c/logic.c`.           |
@@ -371,33 +375,36 @@ bun run build
 - flattens Bézier curves and arcs into polylines,
 - serialises paths into the exact PDC binary format — with `--precise` as
   13.3 fixed-point *precise paths* (1/8 px, anti-aliased on the watch),
-- with `--size N`, scales the artwork so it is emitted at its final on-watch
-  size (the badge icons: 20 px), and
 - with `--normalize`, snaps every fill to a two-color palette — the off-white
   face features (`#f2f4f9`) stay white and everything else (body plus accents
   such as the sleeping "Z" and the no-internet Wi-Fi glyph) becomes the
   `--body-color` (default Home Assistant blue `#18bcf2`).
 
-Because the body color is baked into each PDC, the converter runs once per
+`tools/svg2png.py` reuses that SVG handling for the badge icons and rasterizes
+them instead: an exact-coverage scanline fill with the SVG non-zero rule (so
+holes work), written as an RGBA PNG at `ICON_SIZE`. Both tools use only the
+Python standard library.
+
+Because the body color is baked into each image, the converters run once per
 tint. Which SVGs are converted with which options is a small table in
-`tools/build-pdc.ts` (run by `bun run resources`), one job per line:
+`tools/build-resources.ts` (run by `bun run resources`), one job per line:
 
 - Normal / Happy / Grinning / Sweating → blue `#18bcf2`
 - Disconnected → orange `#f7931e`
 - Sleeping → gray `#999999`
-- Badge icons (`mdi-svgs/*.svg`) → `resources/icons/*.pdc` at 20 px (accent fill baked in)
+- Badge icons (`mdi-svgs/*.svg`) → `resources/icons/*.png` at 20 px (accent fill baked in)
 - Battery → the one `battery.svg` three times: `#ff0000` (low), `#ff9800`
   (medium), `#00ff00` (high) — saturated palette entries on purpose, see the
   Battery badge note above.
 
-The faces and badge icons are declared as `raw` media in `package.json`;
-`pebble build` turns each into a `RESOURCE_ID_<NAME>` constant, which `main.c`
-maps to its expressions and icons, so there are no hand-maintained numeric IDs.
-`tests/resources.test.ts` checks that every declared PDC exists, uses precise
-paths, that the icons match `ICON_SIZE` in `main.c`, and that `main.c` maps
-every resource.
+The faces are declared as `raw` media and the icons as `bitmap` media in
+`package.json`; `pebble build` turns each into a `RESOURCE_ID_<NAME>` constant,
+which `main.c` maps to its expressions and icons, so there are no
+hand-maintained numeric IDs. `tests/resources.test.ts` checks that every
+declared resource exists, that the PDCs use precise paths, that the icons are
+RGBA PNGs of `ICON_SIZE`, and that `main.c` maps every resource.
 
-To add or swap a face, edit the job table in `tools/build-pdc.ts`, the
+To add or swap a face, edit the job table in `tools/build-resources.ts`, the
 `package.json` media array and the resource tables in `src/c/main.c`, then
 `bun run resources && bun run build`.
 

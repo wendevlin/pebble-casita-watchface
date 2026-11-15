@@ -26,9 +26,6 @@ The emitted binary matches Pebble's PDC image layout exactly:
              Circle : type=2, reserved, stroke_color, stroke_width, fill_color,
                       uint16 radius, uint16 point count (=1), int16 center x/y
 
-``--size`` renders the artwork at its final on-watch size (the badge icons),
-so the watch draws it 1:1 instead of rescaling integer points at runtime.
-
 Colors are encoded as Pebble ARGB8 (2 bits per channel). With ``--normalize``
 every non-feature color is mapped to Home Assistant blue (#18bcf2) and the
 facial-feature color (#f2f4f9) is preserved, yielding the requested two-color
@@ -60,8 +57,9 @@ BODY_RGB = (0x18, 0xBC, 0xF2)     # house body (#18bcf2, Home Assistant blue)
 FLATTEN_STEP_PX = 1.25
 FLATTEN_STEP_PRECISE_PX = 0.75
 
-# Output transform, set by main() per run: SVG user units are multiplied by
-# SCALE, and PRECISE selects 13.3 fixed-point "precise path" commands.
+# Output transform, set via configure(): SVG user units are multiplied by
+# SCALE (svg2png.py rasterizes at icon size; PDCs are 1:1), and PRECISE selects
+# 13.3 fixed-point "precise path" commands.
 SCALE = 1.0
 PRECISE = False
 FLATTEN_STEP = FLATTEN_STEP_PX  # in SVG user units; recomputed by configure()
@@ -373,10 +371,14 @@ def flatten_path(d):
             continue
 
         if command in ("Z", "z"):
+            # Z takes no arguments; the letter itself was consumed above. (An
+            # extra `i += 1` here used to swallow the next token, so an `M`
+            # straight after `Z` was lost and the next subpath was glued onto
+            # the previous one.)
             if current is not None:
                 current.closed = True
             cur = start
-            i += 1
+            command = None
             prev_cubic_ctrl = prev_quad_ctrl = None
             continue
 
@@ -674,9 +676,6 @@ def main():
     parser.add_argument("--name", default=None,
                         help="output filename for the single input (e.g. "
                              "batterylow.pdc); only valid with one input file")
-    parser.add_argument("--size", type=float, default=None,
-                        help="scale the artwork so its larger view-box side is "
-                             "SIZE pixels (default: 1 SVG unit = 1 pixel)")
     parser.add_argument("--precise", action="store_true",
                         help="emit precise paths (1/8 px fixed point) for "
                              "smooth anti-aliased edges instead of integer points")
@@ -693,11 +692,7 @@ def main():
     failures = 0
     for src in args.inputs:
         try:
-            scale = 1.0
-            if args.size is not None:
-                vw, vh = get_viewbox_size(ET.parse(src).getroot())
-                scale = args.size / max(vw, vh)
-            configure(scale, args.precise)
+            configure(1.0, args.precise)
             data, count = convert_svg(src, args.normalize, body_rgb)
         except Exception as exc:  # surface conversion errors as build failures
             print("ERROR converting {}: {}".format(src, exc), file=sys.stderr)
