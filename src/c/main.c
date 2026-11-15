@@ -43,7 +43,9 @@
 #define CLOCK_BOX_H 50
 #define CLOCK_INK_TOP 10
 #define CLOCK_INK_H 30
-#define CLOCK_MARGIN_BOTTOM 10
+// On round displays the clock must clear the circle: the corners of a ~110 px
+// wide "08:55" only fit inside a 260 px circle up to y ~ 247.
+#define CLOCK_MARGIN_BOTTOM PBL_IF_ROUND_ELSE(22, 10)
 #define CASITA_MIN_GAP 4
 
 // --------------------------------------------------------------------------- //
