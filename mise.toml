@@ -1,6 +1,5 @@
 [tools]
 bun = "latest"
-"npm:typescript" = "latest"
 
 [settings]
 # Keep the toolchain reproducible across machines.
