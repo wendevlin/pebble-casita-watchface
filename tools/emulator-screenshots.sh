@@ -94,7 +94,9 @@ if ctl emu-set-timeline-quick-view on; then
   ctl emu-set-timeline-quick-view off || true
 fi
 
+# On the older emulator firmware (basalt, chalk, diorite) dropping Bluetooth
+# also drops the link the screenshot travels over, so this shot is best-effort.
 if ctl emu-bt-connection --connected no; then
-  shot light-disconnected
+  shot light-disconnected || echo "note: no disconnected screenshot on the $platform emulator"
   ctl emu-bt-connection --connected yes || true
 fi

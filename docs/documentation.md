@@ -506,8 +506,9 @@ pebble emu-bt-connection --connected yes    # -> time-of-day face
 (themes, badge counts, sweating/sleeping, 12h clock, Quick View, disconnected)
 and saves one screenshot per scenario; the *Emulator screenshots* workflow runs
 it for all six platforms on every pull request. The older emulator firmware
-(basalt, chalk, diorite) doesn't answer `emu-steps` or `emu-bt-connection`, so
-there the steps badge shows `0` and the disconnected shot is skipped.
+(basalt, chalk, diorite) doesn't answer `emu-steps`, and dropping Bluetooth
+there also cuts the screenshot link, so on those the steps badge shows `0` and
+the disconnected shot is skipped.
 
 > **Boot a fresh emulator when reinstalling.** Reinstalling onto an
 > already-running (or stale) emulator can show *"Status: Watchface is not
