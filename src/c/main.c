@@ -24,20 +24,43 @@
 // Geometry (pixels)
 // --------------------------------------------------------------------------- //
 
-// The badge icons are rasterized at exactly this size with anti-aliased alpha
-// (tools/build-resources.ts), so they are blitted 1:1 and never rescaled.
-#define ICON_SIZE 20
+// The badge icons are rasterized at exactly the drawn size per screen class
+// (tools/build-resources.ts generates both sizes and the resource tags pick
+// one per platform), so they are blitted 1:1 and never rescaled.
+#define ICON_SIZE_LARGE 20
+#define ICON_SIZE_SMALL 14
+
+#if PBL_DISPLAY_WIDTH >= 200
+// Pebble Time 2 (emery) and Round 2 (gabbro).
+#define LARGE_SCREEN 1
+#define ICON_SIZE ICON_SIZE_LARGE
 #define PILL_PAD_X 6
 #define PILL_PAD_Y 5
 #define ICON_GAP 3
 #define BADGE_GAP 5
 #define MARGIN 6
 #define BORDER_W 2
-#define PILL_H (ICON_SIZE + PILL_PAD_Y * 2)
-// Distance from a pill's top edge to the top of the Gothic 18 text box that
-// centres the digits in the pill (the font box has empty space above caps).
+#define BADGE_FONT FONT_KEY_GOTHIC_18_BOLD
+// Distance from a pill's top edge to the top of the text box that centres the
+// digits in the pill (the font box has empty space above the caps).
 #define BADGE_TEXT_TOP 3
 #define BADGE_TEXT_BOX_H 24
+#else
+// 144 x 168 (Time, Pebble 2, 2 Duo) and 180 x 180 (Time Round): smaller pills
+// so three still fit on one row.
+#define LARGE_SCREEN 0
+#define ICON_SIZE ICON_SIZE_SMALL
+#define PILL_PAD_X 4
+#define PILL_PAD_Y 3
+#define ICON_GAP 2
+#define BADGE_GAP 3
+#define MARGIN 4
+#define BORDER_W 1
+#define BADGE_FONT FONT_KEY_GOTHIC_14_BOLD
+#define BADGE_TEXT_TOP 1
+#define BADGE_TEXT_BOX_H 18
+#endif
+#define PILL_H (ICON_SIZE + PILL_PAD_Y * 2)
 
 // Clock: Bitham 42 bold. The text box starts above the glyphs' ink, so the
 // box top is offset to put the digits CLOCK_MARGIN_BOTTOM above the bottom.
@@ -45,7 +68,8 @@
 #define CLOCK_INK_TOP 10
 #define CLOCK_INK_H 30
 // On round displays the clock must clear the circle: the corners of a ~110 px
-// wide "08:55" only fit inside a 260 px circle up to y ~ 247.
+// wide "08:55" only fit inside a 260 px circle up to y ~ 247 (gabbro) and a
+// 180 px one up to y ~ 161 (chalk).
 #define CLOCK_MARGIN_BOTTOM PBL_IF_ROUND_ELSE(22, 10)
 #define CASITA_MIN_GAP 4
 
@@ -131,9 +155,9 @@ static GBitmap *s_icons[ICON_COUNT];
 // Casita: one full-size image (the expression changes a few times a day) and
 // one down-scaled clone for when the Quick View shrinks the free space.
 static GDrawCommandImage *s_casita;
-static int s_casita_expr = -1;
+static int s_casita_key = -1;
 static GDrawCommandImage *s_casita_scaled;
-static int s_casita_scaled_expr = -1;
+static int s_casita_scaled_key = -1;
 static int s_casita_scaled_h = 0;
 
 // --------------------------------------------------------------------------- //
@@ -333,6 +357,7 @@ static bool use_fahrenheit(void) {
 // --------------------------------------------------------------------------- //
 
 typedef struct {
+  bool dark;
   GColor background;
   GColor foreground;
   GColor pill;
@@ -340,21 +365,25 @@ typedef struct {
   GColor pill_text;
 } Palette;
 
+// The pill border is a mid gray on colour displays; black-and-white displays
+// have no gray, so it uses the text colour there.
 static Palette palette_for(bool dark) {
   if (dark) {
     return (Palette){
+        .dark = true,
         .background = GColorBlack,
         .foreground = GColorWhite,
         .pill = GColorBlack,
-        .border = GColorDarkGray,
+        .border = PBL_IF_COLOR_ELSE(GColorDarkGray, GColorWhite),
         .pill_text = GColorWhite,
     };
   }
   return (Palette){
+      .dark = false,
       .background = GColorWhite,
       .foreground = GColorBlack,
       .pill = GColorWhite,
-      .border = GColorLightGray,
+      .border = PBL_IF_COLOR_ELSE(GColorLightGray, GColorBlack),
       .pill_text = GColorBlack,
   };
 }
@@ -368,11 +397,40 @@ static GBitmap *icon_image(IconKind kind) {
   return s_icons[kind];
 }
 
-static GDrawCommandImage *casita_image(Expression expr) {
-  if (s_casita_expr != (int)expr) {
+#if defined(PBL_BW)
+// Black-and-white Casita art is a black house with white features. On the dark
+// theme it is inverted so the house stays visible on the black background.
+static GColor invert_bw(GColor color) {
+  if (gcolor_equal(color, GColorBlack)) return GColorWhite;
+  if (gcolor_equal(color, GColorWhite)) return GColorBlack;
+  return color;
+}
+
+static bool invert_command(GDrawCommand *command, uint32_t index, void *context) {
+  gdraw_command_set_fill_color(command, invert_bw(gdraw_command_get_fill_color(command)));
+  gdraw_command_set_stroke_color(command, invert_bw(gdraw_command_get_stroke_color(command)));
+  return true;
+}
+#endif
+
+// Cache key: the expression, plus the theme on black-and-white displays (where
+// the art is recoloured for dark). Colour displays use one image per expression.
+static int casita_key(Expression expr, bool dark) {
+  return (int)expr * 2 + (PBL_IF_BW_ELSE(dark, false) ? 1 : 0);
+}
+
+static GDrawCommandImage *casita_image(Expression expr, bool dark) {
+  const int key = casita_key(expr, dark);
+  if (s_casita_key != key) {
     if (s_casita) gdraw_command_image_destroy(s_casita);
     s_casita = gdraw_command_image_create_with_resource(CASITA_RESOURCES[expr]);
-    s_casita_expr = expr;
+    s_casita_key = key;
+#if defined(PBL_BW)
+    if (s_casita && dark) {
+      gdraw_command_list_iterate(gdraw_command_image_get_command_list(s_casita), invert_command,
+                                 NULL);
+    }
+#endif
   }
   return s_casita;
 }
@@ -407,18 +465,19 @@ static bool scale_command(GDrawCommand *command, uint32_t index, void *context) 
 
 // Returns the Casita image for `expr`, scaled down (aspect preserved) when it
 // is taller than `max_h`. `size` receives the drawn size.
-static GDrawCommandImage *casita_fitting(Expression expr, int max_h, GSize *size) {
-  GDrawCommandImage *full = casita_image(expr);
+static GDrawCommandImage *casita_fitting(Expression expr, bool dark, int max_h, GSize *size) {
+  GDrawCommandImage *full = casita_image(expr, dark);
+  const int key = casita_key(expr, dark);
   if (!full) return NULL;
   const GSize native = gdraw_command_image_get_bounds_size(full);
   if (max_h <= 0 || native.h <= max_h) {
     *size = native;
     return full;
   }
-  if (s_casita_scaled_expr != (int)expr || s_casita_scaled_h != max_h) {
+  if (s_casita_scaled_key != key || s_casita_scaled_h != max_h) {
     if (s_casita_scaled) gdraw_command_image_destroy(s_casita_scaled);
     s_casita_scaled = gdraw_command_image_clone(full);
-    s_casita_scaled_expr = -1;
+    s_casita_scaled_key = -1;
     if (!s_casita_scaled) {
       *size = native;
       return full;
@@ -428,7 +487,7 @@ static GDrawCommandImage *casita_fitting(Expression expr, int max_h, GSize *size
                                scale_command, &ratio);
     gdraw_command_image_set_bounds_size(s_casita_scaled,
                                         GSize(native.w * max_h / native.h, max_h));
-    s_casita_scaled_expr = expr;
+    s_casita_scaled_key = key;
     s_casita_scaled_h = max_h;
   }
   *size = gdraw_command_image_get_bounds_size(s_casita_scaled);
@@ -528,7 +587,19 @@ static void draw_pill(GContext *ctx, int x, int y, int width, const Badge *badge
 
   GBitmap *icon = icon_image(badge->icon);
   if (icon) {
-    // GCompOpSet blends the icon's alpha edges into the pill.
+#if defined(PBL_BW)
+    // Black-and-white icons are a 1-bit palette: transparent + one opaque
+    // symbol colour (black). Recolour that entry to the theme's text colour so
+    // the same bitmap works on a white and a black pill.
+    GColor *palette = gbitmap_get_palette(icon);
+    if (palette) {
+      for (int i = 0; i < 2; i++) {
+        if (palette[i].a != 0) palette[i] = pal->pill_text;
+      }
+    }
+#endif
+    // GCompOpSet honours the icon's transparency (and, on colour displays,
+    // blends its anti-aliased alpha edges into the pill).
     graphics_context_set_compositing_mode(ctx, GCompOpSet);
     graphics_draw_bitmap_in_rect(
         ctx, icon, GRect(x + PILL_PAD_X, y + (PILL_H - ICON_SIZE) / 2, ICON_SIZE, ICON_SIZE));
@@ -607,7 +678,9 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   const GRect bounds = layer_get_bounds(layer);
   const GRect area = layer_get_unobstructed_bounds(layer);
 
+#if defined(PBL_COLOR)
   graphics_context_set_antialiased(ctx, true);
+#endif
   graphics_context_set_fill_color(ctx, pal.background);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
 
@@ -629,7 +702,8 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   const int space_bottom = clock_box_y + CLOCK_INK_TOP;
   const int available = space_bottom - space_top;
   GSize size;
-  GDrawCommandImage *casita = casita_fitting(expr, available - CASITA_MIN_GAP * 2, &size);
+  GDrawCommandImage *casita =
+      casita_fitting(expr, dark, available - CASITA_MIN_GAP * 2, &size);
   if (casita) {
     int y = space_top + (available - size.h) / 2;
     if (y < space_top + CASITA_MIN_GAP) y = space_top + CASITA_MIN_GAP;
@@ -672,7 +746,7 @@ static void init(void) {
   settings_load();
 
   s_time_font = fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD);
-  s_badge_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  s_badge_font = fonts_get_system_font(BADGE_FONT);
 
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers){

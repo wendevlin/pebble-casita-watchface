@@ -1,15 +1,19 @@
 import { expect, test, describe } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
+import { inflateSync } from "node:zlib";
 import { resolve } from "node:path";
 import pkg from "../package.json";
+import { CASITA_TAGS, ICON_SIZE_LARGE, ICON_SIZE_SMALL, ICON_VARIANTS } from "../tools/icon-variants";
 
 /*
  * Guards the generated resources (`bun run resources`, run by `bun run test`
  * first) against the watch code:
- *  - every resource declared in package.json exists,
+ *  - every resource declared in package.json exists, with every per-platform
+ *    tagged variant (tools/icon-variants.ts),
  *  - the Casita PDCs use only precise paths (1/8 px, anti-aliased on the watch),
- *  - the badge icons are RGBA PNGs of exactly ICON_SIZE from src/c/main.c, so
- *    the watch blits them 1:1 and never rescales them,
+ *  - the badge icons have exactly the size main.c draws on that screen class
+ *    (RGBA; the 1-bit watches' variants hold only opaque black and fully
+ *    transparent pixels), so the watch blits them 1:1 and never rescales them,
  *  - main.c maps every declared resource.
  */
 
@@ -44,33 +48,66 @@ function readPdc(file: string): Pdc {
 }
 
 const mainC = readFileSync(resolve(root, "src/c/main.c"), "utf8");
-const iconSize = Number(/#define ICON_SIZE (\d+)/.exec(mainC)?.[1]);
+const define = (name: string): number => Number(new RegExp(`#define ${name} (\\d+)`).exec(mainC)?.[1]);
+
+/** Concatenated IDAT payload of a PNG. */
+function idat(png: Buffer): Buffer {
+  const parts: Buffer[] = [];
+  for (let off = 8; off < png.length; ) {
+    const len = png.readUInt32BE(off);
+    if (png.toString("latin1", off + 4, off + 8) === "IDAT") parts.push(png.subarray(off + 8, off + 8 + len));
+    off += 12 + len;
+  }
+  return Buffer.concat(parts);
+}
+
+const tagged = (file: string, tag: string): string => file.replace(/(\.\w+)$/, `${tag}$1`);
 
 describe("Watch resources", () => {
+  test("icon sizes match main.c", () => {
+    expect(define("ICON_SIZE_LARGE")).toBe(ICON_SIZE_LARGE);
+    expect(define("ICON_SIZE_SMALL")).toBe(ICON_SIZE_SMALL);
+  });
+
   test("every declared resource exists", () => {
     for (const m of media) {
       expect(existsSync(resolve(root, "resources", m.file)), m.file).toBe(true);
     }
   });
 
-  test("every draw command is a precise path", () => {
+  test("every Casita variant uses only precise paths", () => {
+    expect(raw.length).toBeGreaterThan(0);
     for (const m of raw) {
-      const pdc = readPdc(m.file);
-      expect(pdc.commandTypes.length, m.file).toBeGreaterThan(0);
-      for (const type of pdc.commandTypes) expect(type, m.file).toBe(PRECISE_PATH);
+      for (const tag of CASITA_TAGS) {
+        const file = tagged(m.file, tag);
+        const pdc = readPdc(file);
+        expect(pdc.commandTypes.length, file).toBeGreaterThan(0);
+        for (const type of pdc.commandTypes) expect(type, file).toBe(PRECISE_PATH);
+      }
     }
   });
 
-  test("badge icons are RGBA PNG bitmaps of ICON_SIZE", () => {
-    expect(iconSize).toBeGreaterThan(0);
+  test("every badge icon variant is a PNG of its screen class's size", () => {
     expect(icons.length).toBeGreaterThan(0);
     for (const m of icons) {
       expect(m.type, m.name).toBe("bitmap");
-      const png = readFileSync(resolve(root, "resources", m.file));
-      expect(png.subarray(1, 4).toString("latin1"), m.file).toBe("PNG");
-      expect(png.readUInt32BE(16), m.file).toBe(iconSize); // IHDR width
-      expect(png.readUInt32BE(20), m.file).toBe(iconSize); // IHDR height
-      expect(png.readUInt8(25), m.file).toBe(6); // colour type: RGBA
+      for (const v of ICON_VARIANTS) {
+        const file = tagged(m.file, v.tag);
+        const png = readFileSync(resolve(root, "resources", file));
+        expect(png.subarray(1, 4).toString("latin1"), file).toBe("PNG");
+        expect(png.readUInt32BE(16), file).toBe(v.size); // IHDR width
+        expect(png.readUInt32BE(20), file).toBe(v.size); // IHDR height
+        expect(png.readUInt8(25), file).toBe(6); // colour type: RGBA
+        if (v.bw) {
+          const pixels = inflateSync(idat(png));
+          for (let i = 0; i < pixels.length; i += v.size * 4 + 1) {
+            for (let px = i + 1; px < i + 1 + v.size * 4; px += 4) {
+              const rgba = pixels.readUInt32BE(px);
+              expect(rgba === 0x000000ff || rgba === 0, `${file}: only black or clear`).toBe(true);
+            }
+          }
+        }
+      }
     }
   });
 

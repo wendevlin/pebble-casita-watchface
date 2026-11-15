@@ -3,15 +3,17 @@
  *
  *  - Casita expressions -> Pebble Draw Command images (.pdc) via
  *    tools/svg2pdc.py, with precise (1/8 px) paths. They stay vectors because
- *    the watch scales Casita down when the Quick View squeezes the face.
- *  - Badge icons -> anti-aliased RGBA PNGs via tools/svg2png.py, rasterized at
- *    exactly the size the watch draws them (ICON_SIZE in src/c/main.c), so
- *    holes (the calendar page, the thermometer channel) and small details
- *    survive and nothing is rescaled on the watch.
+ *    the watch scales Casita to the free space (small screens, Quick View).
+ *  - Badge icons -> PNGs via tools/svg2png.py, rasterized at exactly the size
+ *    the watch draws them (ICON_SIZE_* in src/c/main.c), so holes and small
+ *    details survive and nothing is rescaled on the watch.
  *
- * The generated files land in resources/ (gitignored) and are declared in
- * package.json `pebble.resources.media` — keep the two in sync
- * (tests/resources.test.ts fails if an entry is missing).
+ * Per-platform variants (large/small, colour/1-bit) use the SDK's resource
+ * file tags; the table is in tools/icon-variants.ts. Casita gets a black
+ * "~bw" variant for the black-and-white watches.
+ *
+ * The generated files land in resources/ (gitignored); tests/resources.test.ts
+ * checks every variant exists with the right size and format.
  *
  * Colours: the watch keeps 2 bits per channel, so pick tints that land on a
  * saturated palette entry. A muted tint (e.g. Material green #4caf50 ->
@@ -22,6 +24,7 @@
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ICON_VARIANTS } from "./icon-variants";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -29,71 +32,74 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const HA_BLUE = "#18bcf2"; // Casita body (also the converter's default)
 const HA_ORANGE = "#f7931e"; // disconnected Casita
 const GREY = "#999999"; // sleeping Casita
+const BLACK = "#000000"; // Casita on black-and-white displays (inverted for dark)
 const GREEN = "#00ff00"; // GColorGreen  — battery >= 70 %
 const ORANGE = "#ff9800"; // GColorChromeYellow (255,170,0) — battery >= 30 %
 const RED = "#ff0000"; // GColorRed — battery < 30 %
 
-// Must match ICON_SIZE in src/c/main.c (checked by tests/resources.test.ts).
-const ICON_SIZE = 20;
-
-const casita = (name: string): string => `casita-svgs/${name}.svg`;
+const casitaSvg = (name: string): string => `casita-svgs/${name}.svg`;
 const mdi = (name: string): string => `mdi-svgs/${name}.svg`;
 
-interface Job {
-  /** Which converter: vector PDC or rasterized PNG icon. */
-  kind: "pdc" | "png";
-  /** Output directory, relative to the repo root. */
-  out: string;
-  /** SVG inputs, relative to the repo root. */
-  files: string[];
-  /**
-   * Paint every fill in bodyColor, keeping the off-white face colour. Off for
-   * the MDI icons, whose accent fill is baked into the SVG.
-   */
-  normalize?: boolean;
-  bodyColor?: string;
-  /** Output file name, for rendering the same SVG in several tints. */
-  name?: string;
+function run(tool: string, args: string[]): void {
+  const result = spawnSync("python3", [resolve(root, "tools", tool), ...args], { cwd: root, stdio: "inherit" });
+  if (result.status !== 0) {
+    console.error(`${tool} failed (${result.status ?? result.signal}): ${args.join(" ")}`);
+    process.exit(result.status ?? 1);
+  }
 }
 
-const JOBS: Job[] = [
-  // Casita expressions: HA blue body by default.
-  {
-    kind: "pdc",
-    out: "resources/casita",
-    normalize: true,
-    bodyColor: HA_BLUE,
-    files: ["Normal", "Happy", "Grinning", "Sweating"].map(casita),
-  },
-  { kind: "pdc", out: "resources/casita", normalize: true, bodyColor: HA_ORANGE, files: [casita("No internet")] },
-  { kind: "pdc", out: "resources/casita", normalize: true, bodyColor: GREY, files: [casita("Sleeping")] },
+// --- Casita expressions ----------------------------------------------------- //
 
-  // Badge icons with their accent fill baked into the SVG.
-  {
-    kind: "png",
-    out: "resources/icons",
-    files: ["thermometer", "shoe-print", "calendar-blank", "home-thermometer"].map(mdi),
-  },
+// output name -> [source SVG, colour body tint]
+const CASITA: Record<string, [string, string]> = {
+  "normal.pdc": [casitaSvg("Normal"), HA_BLUE],
+  "happy.pdc": [casitaSvg("Happy"), HA_BLUE],
+  "grinning.pdc": [casitaSvg("Grinning"), HA_BLUE],
+  "sweating.pdc": [casitaSvg("Sweating"), HA_BLUE],
+  "disconnected.pdc": [casitaSvg("No internet"), HA_ORANGE],
+  "sleeping.pdc": [casitaSvg("Sleeping"), GREY],
+};
 
-  // One battery glyph, three tints by charge level.
-  { kind: "png", out: "resources/icons", normalize: true, bodyColor: RED, name: "batterylow.png", files: [mdi("battery")] },
-  { kind: "png", out: "resources/icons", normalize: true, bodyColor: ORANGE, name: "batterymedium.png", files: [mdi("battery")] },
-  { kind: "png", out: "resources/icons", normalize: true, bodyColor: GREEN, name: "batteryhigh.png", files: [mdi("battery")] },
+for (const [name, [svg, tint]] of Object.entries(CASITA)) {
+  const common = ["--precise", "--normalize", "--out", "resources/casita"];
+  run("svg2pdc.py", [...common, "--body-color", tint, "--name", name, svg]);
+  run("svg2pdc.py", [...common, "--body-color", BLACK, "--name", name.replace(".pdc", "~bw.pdc"), svg]);
+}
+
+// --- Badge icons ------------------------------------------------------------ //
+
+interface Icon {
+  /** Output base name (package.json `file` without .png). */
+  name: string;
+  /** Source for the colour variants. */
+  svg: string;
+  /** Tint for colour variants of single-colour glyphs; omitted = SVG colours. */
+  tint?: string;
+  /** Source for the black-and-white variant, when it differs. */
+  bwSvg?: string;
+}
+
+const ICONS: Icon[] = [
+  { name: "thermometer", svg: mdi("thermometer") },
+  { name: "shoeprint", svg: mdi("shoe-print") },
+  { name: "calendarblank", svg: mdi("calendar-blank") },
+  { name: "homethermometer", svg: mdi("home-thermometer") },
+  // Colour displays tint one battery glyph by charge level; black-and-white
+  // displays show the level as bars instead.
+  { name: "batterylow", svg: mdi("battery"), tint: RED, bwSvg: mdi("battery-low") },
+  { name: "batterymedium", svg: mdi("battery"), tint: ORANGE, bwSvg: mdi("battery-medium") },
+  { name: "batteryhigh", svg: mdi("battery"), tint: GREEN, bwSvg: mdi("battery-high") },
 ];
 
-for (const job of JOBS) {
-  const args =
-    job.kind === "pdc"
-      ? [resolve(root, "tools/svg2pdc.py"), "--precise"]
-      : [resolve(root, "tools/svg2png.py"), "--size", String(ICON_SIZE)];
-  if (job.normalize) args.push("--normalize");
-  if (job.bodyColor) args.push("--body-color", job.bodyColor);
-  if (job.name) args.push("--name", job.name);
-  args.push("--out", job.out, ...job.files);
-
-  const result = spawnSync("python3", args, { cwd: root, stdio: "inherit" });
-  if (result.status !== 0) {
-    console.error(`${job.kind} conversion failed (${result.status ?? result.signal}) for: ${job.files.join(", ")}`);
-    process.exit(result.status ?? 1);
+for (const icon of ICONS) {
+  for (const v of ICON_VARIANTS) {
+    const args = ["--size", String(v.size), "--out", "resources/icons", "--name", `${icon.name}${v.tag}.png`];
+    if (v.bw) {
+      args.push("--bw", icon.bwSvg ?? icon.svg);
+    } else {
+      if (icon.tint) args.push("--normalize", "--body-color", icon.tint);
+      args.push(icon.svg);
+    }
+    run("svg2png.py", args);
   }
 }

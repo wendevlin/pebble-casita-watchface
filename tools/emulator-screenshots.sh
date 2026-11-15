@@ -32,6 +32,17 @@ msg() {
   done
   pebble send-app-message "${emu[@]}" "${args[@]}" >/dev/null
 }
+# Emulator controls the older platforms' firmware may not answer (emu-steps,
+# emu-bt-connection on basalt/chalk/diorite): note it and carry on.
+ctl() {
+  if ! pebble "$@" "${emu[@]}" >/dev/null 2>&1; then
+    echo "note: '$1' is not supported by the $platform emulator"
+    return 1
+  fi
+}
+# The battery badge refreshes on the minute redraw, not on battery events, so
+# give the emulated battery a moment before the next message forces a redraw.
+battery() { ctl emu-battery --percent "$1" || true; sleep 2; }
 shot() {
   sleep 2
   pebble screenshot --no-open "${emu[@]}" "$out/${platform}-$1.png" >/dev/null
@@ -42,10 +53,10 @@ pebble install "${emu[@]}" "$pbw"
 # Let PebbleKit JS send its startup settings before ours override them.
 sleep 8
 
-pebble emu-time-format "${emu[@]}" --format 24h
-pebble emu-battery "${emu[@]}" --percent 80
-pebble emu-steps "${emu[@]}" 4321
-pebble emu-set-time "${emu[@]}" 08:55:00
+ctl emu-time-format --format 24h || true
+battery 80
+ctl emu-steps 4321 || true
+ctl emu-set-time 08:55:00 || true
 
 all_badges=(SHOW_DATE=1 SHOW_WEATHER=1 SHOW_STEPS=1 SHOW_BATTERY=1 SHOW_HOME_TEMP=1)
 
@@ -58,28 +69,32 @@ shot dark-5-badges
 msg --int THEME=0 SHOW_BATTERY=0 SHOW_HOME_TEMP=0
 shot light-3-badges
 
-pebble emu-battery "${emu[@]}" --percent 15
+battery 15
 msg --int THEME=1 SHOW_STEPS=0 SHOW_WEATHER=0 SHOW_BATTERY=1 --string BADGE_ORDER=bdwsh
 shot dark-2-badges-low-battery
 
-pebble emu-battery "${emu[@]}" --percent 55
+battery 55
 msg --int THEME=0 WEATHER_TEMP=324 "${all_badges[@]}" --string BADGE_ORDER=dwsbh
 shot light-sweating
 
-pebble emu-set-time "${emu[@]}" 23:10:00
-msg --int THEME=1 WEATHER_TEMP=-53
+# Readings older than an hour show as "--", so re-send both temperatures
+# after moving the clock.
+ctl emu-set-time 23:10:00 || true
+msg --int THEME=1 WEATHER_TEMP=-53 HA_TEMP=214
 shot dark-sleeping
 
-pebble emu-time-format "${emu[@]}" --format 12h
-pebble emu-set-time "${emu[@]}" 13:07:00
-msg --int THEME=0 WEATHER_TEMP=181
+ctl emu-time-format --format 12h || true
+ctl emu-set-time 13:07:00 || true
+msg --int THEME=0 WEATHER_TEMP=181 HA_TEMP=214
 shot light-12h
 
-pebble emu-set-timeline-quick-view "${emu[@]}" on
-msg --int THEME=0
-shot light-quick-view
-pebble emu-set-timeline-quick-view "${emu[@]}" off
+if ctl emu-set-timeline-quick-view on; then
+  msg --int THEME=0
+  shot light-quick-view
+  ctl emu-set-timeline-quick-view off || true
+fi
 
-pebble emu-bt-connection "${emu[@]}" --connected no
-shot light-disconnected
-pebble emu-bt-connection "${emu[@]}" --connected yes
+if ctl emu-bt-connection --connected no; then
+  shot light-disconnected
+  ctl emu-bt-connection --connected yes || true
+fi

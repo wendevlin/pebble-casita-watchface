@@ -16,6 +16,12 @@ Bezier/arc flattening and the --normalize palette) and adds:
   * a minimal PNG (RGBA8) writer.
 
 Strokes are not rendered; the icons are fill-only.
+
+With --bw the output is for the black-and-white watches (Pebble 2, 2 Duo): no
+anti-aliasing, just an opaque black symbol (coverage >= 50 %) on a fully
+transparent background. The SDK stores that as a 1-bit palette bitmap with a
+transparent entry; the watch draws it with GCompOpSet and recolours the
+symbol's palette entry to white on the dark theme.
 """
 
 import argparse
@@ -160,7 +166,7 @@ def render(fills, width, height, scale):
 # --------------------------------------------------------------------------- #
 # PNG writer
 # --------------------------------------------------------------------------- #
-def png_bytes(rgba, width, height):
+def png_bytes(rgba, width, height, bw=False):
     def chunk(kind, data):
         body = kind + data
         return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
@@ -169,13 +175,16 @@ def png_bytes(rgba, width, height):
     for row in range(height):
         raw.append(0)  # filter: none
         for r, g, b, a in rgba[row * width:(row + 1) * width]:
-            raw.extend(int(round(v * 255)) for v in (r, g, b, a))
+            if bw:
+                raw.extend((0, 0, 0, 255) if a >= 0.5 else (0, 0, 0, 0))
+            else:
+                raw.extend(int(round(v * 255)) for v in (r, g, b, a))
     header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)  # 8-bit RGBA
     return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
             + chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + chunk(b"IEND", b""))
 
 
-def convert(path, size, normalize, body_rgb):
+def convert(path, size, normalize, body_rgb, bw=False):
     root = ET.parse(path).getroot()
     vw, vh = svg2pdc.get_viewbox_size(root)
     scale = size / max(vw, vh)
@@ -183,7 +192,7 @@ def convert(path, size, normalize, body_rgb):
     # Flatten curves finely: the rasterizer resolves sub-pixel detail.
     svg2pdc.configure(scale, precise=True)
     fills = collect_fills(root, svg2pdc.parse_stylesheet(root), normalize, body_rgb)
-    return png_bytes(render(fills, width, height, scale), width, height), width, height
+    return png_bytes(render(fills, width, height, scale), width, height, bw), width, height
 
 
 def main():
@@ -196,6 +205,8 @@ def main():
                         help="paint every fill in --body-color (feature white kept)")
     parser.add_argument("--body-color", default="#18bcf2", help="fill used with --normalize")
     parser.add_argument("--name", default=None, help="output file name (single input only)")
+    parser.add_argument("--bw", action="store_true",
+                        help="1-bit output for black-and-white watches: black symbol, transparent background")
     args = parser.parse_args()
 
     if args.name is not None and len(args.inputs) != 1:
@@ -206,7 +217,7 @@ def main():
 
     os.makedirs(args.out, exist_ok=True)
     for src in args.inputs:
-        data, width, height = convert(src, args.size, args.normalize, body_rgb)
+        data, width, height = convert(src, args.size, args.normalize, body_rgb, args.bw)
         if args.name is not None:
             name = args.name if args.name.endswith(".png") else args.name + ".png"
         else:

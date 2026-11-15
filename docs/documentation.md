@@ -16,6 +16,27 @@ weather, Home Assistant) is **TypeScript** running in PebbleKit JS. Builds are
 orchestrated with **Bun** via **Mise**. Artwork ships as **Pebble Draw Command**
 (`.pdc`) vector images generated from SVG by a self-contained Python converter.
 
+## Supported watches
+
+| Watch | Platform | Display | Notes |
+| --- | --- | --- | --- |
+| Pebble Time 2 | `emery` | 200×228, colour | Large badges |
+| Pebble Round 2 | `gabbro` | 260×260 round, colour | Large badges |
+| Pebble Time / Time Steel | `basalt` | 144×168, colour | Compact badges |
+| Pebble Time Round | `chalk` | 180×180 round, colour | Compact badges |
+| Pebble 2 | `diorite` | 144×168, black & white | Compact badges, 1-bit art |
+| Pebble 2 Duo | `flint` | 144×168, black & white | Compact badges, 1-bit art |
+
+The original Pebble / Pebble Steel (`aplite`) is not supported: 24 KB for code
+and heap and no Pebble Health.
+
+Screens narrower than 200 px use compact badges (14 px icons, Gothic 14, tighter
+padding) so three still fit on a row. Casita is a vector image and scales to
+the free space on every screen. On the black-and-white watches Casita is a
+black house with white features (inverted on the dark theme), the pill borders
+are black or white instead of gray, and the battery badge shows the charge as
+bars instead of colour.
+
 ## Screenshots
 
 | Light theme | Dark theme |
@@ -205,7 +226,7 @@ the next sits to its left, and so on, so the top-priority badge stays put no
 matter how many others are enabled. The row planning is the pure, unit-tested
 `layout_badges()` in `src/c/logic.c`:
 
-- **Rectangular (Pebble Time 2):** the first row hugs the right edge and takes
+- **Rectangular:** the first row hugs the right edge and takes
   the first **three** badges (a wide trio may run past the left edge; accepted).
   Badges four and five go on a second row pinned to the **corners** — four in
   the bottom-right, five in the bottom-left — so the middle of that row stays
@@ -214,7 +235,7 @@ matter how many others are enabled. The row planning is the pure, unit-tested
   corners empty, the corner badges sit in that space and the roof peak rises
   between them. (The sleeping and disconnected expressions fill those corners,
   so they reserve the full stack and shrink Casita instead.)
-- **Round (Pebble Round 2):** the circle is narrow at the top and wide just
+- **Round:** the circle is narrow at the top and wide just
   below, so the stack is **1 + 2 + 2**. The first badge sits alone, centred, in
   the narrow top row; badges two and three form a centred pair on the second row
   (badge 2 on the right); badges four and five go on a third row pinned to the
@@ -256,8 +277,9 @@ Each badge is a rounded pill with an
   Health is unavailable (no permission / unsupported) the badge is hidden.
 - **Battery** is the watch's own charge level (`battery_state_service_peek()`,
   read on every minute redraw), shown as a whole percent. Its icon is colour-coded by level: green at ≥ 70%, orange at
-  ≥ 30%, red below 30% (three pre-tinted PDC variants generated from the one
-  `battery.svg`). The tints are the fully saturated palette entries
+  ≥ 30%, red below 30% (three pre-tinted variants generated from the one
+  `battery.svg`; the black-and-white watches use MDI `battery-low/medium/high`
+  instead, showing one, two or three bars). The tints are the fully saturated palette entries
   `GColorGreen` (`#00ff00`), `GColorChromeYellow` (`#ff9800` → 255,170,0) and
   `GColorRed` (`#ff0000`): the converter truncates to 2 bits per channel, and the
   muted Material green that resulted from `#4caf50` (85,170,85) read as grey on
@@ -279,11 +301,15 @@ sources live in `mdi-svgs/` with an accent fill baked in.
 the palette uses the named colors directly: white background and pill fill with
 a `GColorLightGray` border (light theme), black background and pill fill with a
 `GColorDarkGray` border (dark theme). The pill fill matches the background on
-purpose — the badge is defined by its 2 px border.
+purpose — the badge is defined by its border (2 px, 1 px on compact badges). On
+black-and-white watches the border is black (light) or white (dark).
 
 **Sharpness** — the badge icons are rasterized offline at exactly the size the
-watch draws them (`ICON_SIZE`, 20 px) into PNGs with anti-aliased alpha, and the
-watch blits them 1:1 (`GCompOpSet`). That keeps holes (the calendar page, the
+watch draws them (`ICON_SIZE_LARGE` 20 px, `ICON_SIZE_SMALL` 14 px) into PNGs
+with anti-aliased alpha, and the watch blits them 1:1 (`GCompOpSet`). The
+black-and-white watches get a black symbol on a transparent background, which
+the SDK stores as a 1-bit palette bitmap; the watch recolours the symbol's
+palette entry to the theme's text colour, so one bitmap serves both themes. That keeps holes (the calendar page, the
 thermometer channel) — which vector draw commands cannot express — and gives
 smooth edges. The JS version scaled 24 px integer-point PDC icons down at
 runtime, which rounded every vertex to a whole pixel and filled the holes in.
@@ -343,7 +369,7 @@ has no `pebble.h` dependency so it is unit-tested on the host with plain `cc`.
 
 ## Prerequisites
 
-- [Mise](https://mise.jdx.dev/) — provisions Bun and TypeScript (see `mise.toml`).
+- [Mise](https://mise.jdx.dev/) — provisions Bun (see `mise.toml`); TypeScript is a devDependency.
 - The **Pebble SDK** (`pebble` tool, SDK 4.33.1) available on your `PATH`, with
   its emulators installed. It compiles the C watch code and packages the PBW.
 - A host C compiler (`cc`) for the logic unit tests.
@@ -396,8 +422,11 @@ bun run build
 
 `tools/svg2png.py` reuses that SVG handling for the badge icons and rasterizes
 them instead: an exact-coverage scanline fill with the SVG non-zero rule (so
-holes work), written as an RGBA PNG at `ICON_SIZE`. Both tools use only the
-Python standard library.
+holes work), written as an RGBA PNG at the given `--size`. With `--bw` it
+skips anti-aliasing and writes an opaque black symbol on a transparent
+background, which the SDK stores as a 1-bit palette bitmap for the
+black-and-white watches. Both tools use only the Python
+standard library.
 
 Because the body color is baked into each image, the converters run once per
 tint. Which SVGs are converted with which options is a small table in
@@ -406,17 +435,32 @@ tint. Which SVGs are converted with which options is a small table in
 - Normal / Happy / Grinning / Sweating → blue `#18bcf2`
 - Disconnected → orange `#f7931e`
 - Sleeping → gray `#999999`
-- Badge icons (`mdi-svgs/*.svg`) → `resources/icons/*.png` at 20 px (accent fill baked in)
+- every face again as a black `~bw` variant for the black-and-white watches
+- Badge icons (`mdi-svgs/*.svg`) → `resources/icons/*.png` (accent fill baked in)
 - Battery → the one `battery.svg` three times: `#ff0000` (low), `#ff9800`
   (medium), `#00ff00` (high) — saturated palette entries on purpose, see the
-  Battery badge note above.
+  Battery badge note above; `battery-low/medium/high.svg` for black-and-white.
+
+Each icon is generated once per platform variant (`tools/icon-variants.ts`).
+`package.json` names the plain file and `pebble build` picks the most specific
+[tagged](https://developer.repebble.com/guides/app-resources/platform-specific)
+sibling per platform:
+
+| File tag | Platforms | Icon |
+| --- | --- | --- |
+| *(none)* | emery, gabbro | 20 px colour |
+| `~color~144w` | basalt | 14 px colour |
+| `~180w` | chalk | 14 px colour |
+| `~bw` | diorite, flint | 14 px 1-bit |
 
 The faces are declared as `raw` media and the icons as `bitmap` media in
 `package.json`; `pebble build` turns each into a `RESOURCE_ID_<NAME>` constant,
 which `main.c` maps to its expressions and icons, so there are no
 hand-maintained numeric IDs. `tests/resources.test.ts` checks that every
-declared resource exists, that the PDCs use precise paths, that the icons are
-RGBA PNGs of `ICON_SIZE`, and that `main.c` maps every resource.
+declared resource and every tagged variant exists, that the PDCs use precise
+paths, that each icon variant has its screen class's size and format (matching
+`ICON_SIZE_LARGE` / `ICON_SIZE_SMALL` in `main.c`), and that `main.c` maps every
+resource.
 
 To add or swap a face, edit the job table in `tools/build-resources.ts`, the
 `package.json` media array and the resource tables in `src/c/main.c`, then
@@ -458,10 +502,12 @@ pebble emu-bt-connection --connected no    # -> Disconnected face
 pebble emu-bt-connection --connected yes    # -> time-of-day face
 ```
 
-`tools/emulator-screenshots.sh <emery|gabbro> <out-dir>` drives all of this
+`tools/emulator-screenshots.sh <platform> <out-dir>` drives all of this
 (themes, badge counts, sweating/sleeping, 12h clock, Quick View, disconnected)
 and saves one screenshot per scenario; the *Emulator screenshots* workflow runs
-it on every pull request.
+it for all six platforms on every pull request. The older emulator firmware
+(basalt, chalk, diorite) doesn't answer `emu-steps` or `emu-bt-connection`, so
+there the steps badge shows `0` and the disconnected shot is skipped.
 
 > **Boot a fresh emulator when reinstalling.** Reinstalling onto an
 > already-running (or stale) emulator can show *"Status: Watchface is not

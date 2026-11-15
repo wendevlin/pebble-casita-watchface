@@ -10,6 +10,9 @@ weather, Home Assistant) is **TypeScript** running in PebbleKit JS. Builds are
 orchestrated with **Bun** via **Mise**. Artwork ships as **Pebble Draw Command**
 (`.pdc`) vector images generated from SVG by a self-contained Python converter.
 
+Runs on every Pebble except the original Pebble / Steel: Pebble Time, Time
+Steel, Time Round, Pebble 2, Pebble 2 Duo, Pebble Time 2 and Pebble Round 2.
+
 ## Screenshots
 
 | Light theme | Dark theme |
