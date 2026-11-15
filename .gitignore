@@ -13,8 +13,6 @@ resources/icons/*.pdc
 src/pkjs/index.js
 # Generated settings markup (rendered from src/pkjs/config.eta by `bun run render-config`)
 src/pkjs/config-html.ts
-# Generated resource-ID enums (derived from package.json by `bun run render-resources`)
-src/embeddedjs/resource-ids.ts
 
 # Dependencies
 node_modules/

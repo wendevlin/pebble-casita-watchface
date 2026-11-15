@@ -1,0 +1,73 @@
+name: Emulator screenshots
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: ["ccr-*"]
+  workflow_dispatch:
+
+jobs:
+  screenshots:
+    name: Screenshots (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [emery, gabbro]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: bun install
+
+      - name: Install emulator dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libsdl2-2.0-0 libpixman-1-0 libfdt1
+
+      - name: Install pebble-tool
+        run: pip install pebble-tool
+
+      - name: Install Pebble SDK
+        run: |
+          pebble sdk set-channel release
+          yes | pebble sdk install 4.33.1
+
+      - name: Build .pbw
+        run: bun run build
+
+      - name: Capture screenshots
+        run: |
+          Xvfb :99 -screen 0 1024x768x24 &
+          export DISPLAY=:99
+          sleep 2
+          bash tools/emulator-screenshots.sh ${{ matrix.platform }} screenshots
+
+      - name: Print screenshots (base64)
+        if: always()
+        run: |
+          for f in screenshots/*.png; do
+            echo "=== $f"
+            base64 -w0 "$f"
+            echo
+          done
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ matrix.platform }}
+          path: screenshots/*.png
+
+      - name: Upload .pbw
+        if: matrix.platform == 'emery'
+        uses: actions/upload-artifact@v4
+        with:
+          name: casita-watchface-pbw
+          path: build/*.pbw

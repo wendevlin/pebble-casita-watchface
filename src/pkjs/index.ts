@@ -59,7 +59,7 @@ interface Config {
   view: string;
 }
 
-// Badge order (mirrors src/embeddedjs/logic.ts): the order is persisted/sent as
+// Badge order (mirrors parse_badge_order in src/c/logic.c): the order is persisted/sent as
 // the compact code string "dwsb" (date/weather/steps/battery). Kept as a tiny
 // local copy so the phone bundle stays self-contained (it can't import the
 // watch modules).

@@ -10,21 +10,20 @@
   "license": "MIT",
   "dependencies": {},
   "scripts": {
-    "resources": "bun run render-resources && bun tools/build-pdc.ts",
-    "typecheck": "bun run render-config && bun run render-resources && tsc --noEmit && tsc -p tsconfig.pkjs.json && tsc -p tsconfig.tools.json",
-    "test": "bun run render-resources && bun test",
+    "resources": "bun tools/build-pdc.ts",
+    "typecheck": "bun run render-config && tsc -p tsconfig.pkjs.json && tsc -p tsconfig.tools.json",
+    "test": "bun run resources && bun test && bun run test:c",
     "render-config": "bun tools/render-config.ts",
-    "render-resources": "bun tools/render-resources.ts",
     "build:pkjs": "bun run render-config && bun build src/pkjs/index.ts --outfile src/pkjs/index.js --target browser --format iife",
     "build": "bun run resources && bun run build:pkjs && pebble build",
     "clean": "pebble clean",
     "emulator:emery": "pebble install --emulator emery --logs",
-    "emulator:gabbro": "pebble install --emulator gabbro --logs"
+    "emulator:gabbro": "pebble install --emulator gabbro --logs",
+    "test:c": "mkdir -p build/host-tests && cc -std=c99 -Wall -Wextra -Werror -Isrc/c tests/c/test_logic.c src/c/logic.c -o build/host-tests/test_logic && build/host-tests/test_logic"
   },
   "pebble": {
     "displayName": "Casita",
     "uuid": "ccaf2e63-9f29-4534-877d-23072a555a38",
-    "projectType": "moddable",
     "sdkVersion": "3",
     "enableMultiJS": true,
     "targetPlatforms": [
@@ -35,7 +34,8 @@
       "watchface": true
     },
     "capabilities": [
-      "configurable"
+      "configurable",
+      "health"
     ],
     "messageKeys": [
       "THEME",

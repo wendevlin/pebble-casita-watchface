@@ -44,7 +44,13 @@ interface Job {
   bodyColor?: string;
   /** Output file name, for rendering the same SVG in several tints. */
   name?: string;
+  /** Final on-watch size in pixels (larger view-box side); omitted = 1:1. */
+  size?: number;
 }
+
+// Badge icons are emitted at exactly the size the watch draws them
+// (ICON_SIZE in src/c/main.c), so they are never rescaled on the watch.
+const ICON_SIZE = 20;
 
 const JOBS: Job[] = [
   // Casita expressions: HA blue body by default.
@@ -58,16 +64,23 @@ const JOBS: Job[] = [
   { out: "resources/casita", normalize: true, bodyColor: GREY, files: [casita("Sleeping")] },
 
   // Badge icons with their accent fill baked into the SVG.
-  { out: "resources/icons", files: ["thermometer", "shoe-print", "calendar-blank", "home-thermometer"].map(mdi) },
+  {
+    out: "resources/icons",
+    size: ICON_SIZE,
+    files: ["thermometer", "shoe-print", "calendar-blank", "home-thermometer"].map(mdi),
+  },
 
   // One battery glyph, three tints by charge level.
-  { out: "resources/icons", normalize: true, bodyColor: RED, name: "batterylow.pdc", files: [mdi("battery")] },
-  { out: "resources/icons", normalize: true, bodyColor: ORANGE, name: "batterymedium.pdc", files: [mdi("battery")] },
-  { out: "resources/icons", normalize: true, bodyColor: GREEN, name: "batteryhigh.pdc", files: [mdi("battery")] },
+  { out: "resources/icons", size: ICON_SIZE, normalize: true, bodyColor: RED, name: "batterylow.pdc", files: [mdi("battery")] },
+  { out: "resources/icons", size: ICON_SIZE, normalize: true, bodyColor: ORANGE, name: "batterymedium.pdc", files: [mdi("battery")] },
+  { out: "resources/icons", size: ICON_SIZE, normalize: true, bodyColor: GREEN, name: "batteryhigh.pdc", files: [mdi("battery")] },
 ];
 
 for (const job of JOBS) {
-  const args = [converter];
+  // Every image uses precise (1/8 px) paths: the watch anti-aliases them, so
+  // curves and diagonals come out smooth instead of stair-stepped.
+  const args = [converter, "--precise"];
+  if (job.size) args.push("--size", String(job.size));
   if (job.normalize) args.push("--normalize");
   if (job.bodyColor) args.push("--body-color", job.bodyColor);
   if (job.name) args.push("--name", job.name);

@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+#
+# Installs the built .pbw in the Pebble emulator and captures one screenshot per
+# scenario (themes, expressions, badge counts, Quick View, disconnected).
+#
+#   tools/emulator-screenshots.sh <platform> <out-dir>
+#
+# Requires a prior `bun run build`. Each scenario pushes its state with the
+# emulator controls and an AppMessage (which also forces a redraw), so the
+# shots are deterministic apart from the phone-side weather fetch.
+set -euo pipefail
+
+platform="${1:?platform (emery|gabbro)}"
+out="${2:?output directory}"
+mkdir -p "$out"
+
+emu=(--emulator "$platform")
+pbw=$(ls build/*.pbw | head -n 1)
+
+msg() { pebble send-app-message "${emu[@]}" "$@" >/dev/null; }
+shot() {
+  sleep 2
+  pebble screenshot --no-open "${emu[@]}" "$out/${platform}-$1.png" >/dev/null
+  echo "captured $out/${platform}-$1.png"
+}
+
+pebble install "${emu[@]}" "$pbw"
+# Let PebbleKit JS send its startup settings before ours override them.
+sleep 8
+
+pebble emu-time-format "${emu[@]}" --format 24h
+pebble emu-battery "${emu[@]}" --percent 80
+pebble emu-steps "${emu[@]}" 4321
+pebble emu-set-time "${emu[@]}" 08:55:00
+
+all_badges=(SHOW_DATE=1 SHOW_WEATHER=1 SHOW_STEPS=1 SHOW_BATTERY=1 SHOW_HOME_TEMP=1)
+
+msg --int THEME=0 WEATHER_TEMP=136 HA_TEMP=214 "${all_badges[@]}" --string BADGE_ORDER=dwsbh
+shot light-5-badges
+
+msg --int THEME=1
+shot dark-5-badges
+
+msg --int THEME=0 SHOW_BATTERY=0 SHOW_HOME_TEMP=0
+shot light-3-badges
+
+pebble emu-battery "${emu[@]}" --percent 15
+msg --int THEME=1 SHOW_STEPS=0 SHOW_WEATHER=0 SHOW_BATTERY=1 --string BADGE_ORDER=bdwsh
+shot dark-2-badges-low-battery
+
+pebble emu-battery "${emu[@]}" --percent 55
+msg --int THEME=0 WEATHER_TEMP=324 "${all_badges[@]}" --string BADGE_ORDER=dwsbh
+shot light-sweating
+
+pebble emu-set-time "${emu[@]}" 23:10:00
+msg --int THEME=1 WEATHER_TEMP=-53
+shot dark-sleeping
+
+pebble emu-time-format "${emu[@]}" --format 12h
+pebble emu-set-time "${emu[@]}" 13:07:00
+msg --int THEME=0 WEATHER_TEMP=181
+shot light-12h
+
+pebble emu-set-timeline-quick-view "${emu[@]}" on
+msg --int THEME=0
+shot light-quick-view
+pebble emu-set-timeline-quick-view "${emu[@]}" off
+
+pebble emu-bt-connection "${emu[@]}" --connected no
+shot light-disconnected
+pebble emu-bt-connection "${emu[@]}" --connected yes

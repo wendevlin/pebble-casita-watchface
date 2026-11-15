@@ -20,14 +20,11 @@ jobs:
       - name: Render config template
         run: bun run render-config
 
-      - name: Generate resource IDs
-        run: bun run render-resources
-
       - name: Typecheck
         run: bun run typecheck
 
       - name: Run tests
-        run: bun test
+        run: bun run test
 
   build:
     name: Build .pbw

@@ -19,10 +19,15 @@ The emitted binary matches Pebble's PDC image layout exactly:
     Header : version=1, reserved=0,
              view-box width, height       (<BBhh>)
     List   : uint16 command count, then each command:
-             Path   : type=1, reserved, stroke_color, stroke_width, fill_color,
-                      open flag, reserved, uint16 point count, int16 x/y points
+             Path   : type=1 (integer points) or 3 (precise: 13.3 fixed-point
+                      points, with --precise), reserved, stroke_color,
+                      stroke_width, fill_color, open flag, reserved,
+                      uint16 point count, int16 x/y points
              Circle : type=2, reserved, stroke_color, stroke_width, fill_color,
                       uint16 radius, uint16 point count (=1), int16 center x/y
+
+``--size`` renders the artwork at its final on-watch size (the badge icons),
+so the watch draws it 1:1 instead of rescaling integer points at runtime.
 
 Colors are encoded as Pebble ARGB8 (2 bits per channel). With ``--normalize``
 every non-feature color is mapped to Home Assistant blue (#18bcf2) and the
@@ -43,13 +48,32 @@ XMLNS = "{http://www.w3.org/2000/svg}"
 DRAW_COMMAND_VERSION = 1
 DRAW_COMMAND_TYPE_PATH = 1
 DRAW_COMMAND_TYPE_CIRCLE = 2
+DRAW_COMMAND_TYPE_PRECISE_PATH = 3
 
 # Two-color Casita palette used by --normalize.
 FEATURE_RGB = (0xF2, 0xF4, 0xF9)  # eyes / mouth / strokes (#f2f4f9)
 BODY_RGB = (0x18, 0xBC, 0xF2)     # house body (#18bcf2, Home Assistant blue)
 
-# Curve flattening: target line length (in SVG user units) per subdivision.
-FLATTEN_STEP = 1.25
+# Curve flattening: target line length (in OUTPUT pixels) per subdivision.
+# Integer paths can't resolve detail below a pixel anyway; precise paths keep
+# 1/8 px, so they get a finer step for rounder curves under anti-aliasing.
+FLATTEN_STEP_PX = 1.25
+FLATTEN_STEP_PRECISE_PX = 0.75
+
+# Output transform, set by main() per run: SVG user units are multiplied by
+# SCALE, and PRECISE selects 13.3 fixed-point "precise path" commands.
+SCALE = 1.0
+PRECISE = False
+FLATTEN_STEP = FLATTEN_STEP_PX  # in SVG user units; recomputed by configure()
+
+
+def configure(scale, precise):
+    """Set the output scale / precision (and the flattening step that follows)."""
+    global SCALE, PRECISE, FLATTEN_STEP
+    SCALE = scale
+    PRECISE = precise
+    step_px = FLATTEN_STEP_PRECISE_PX if precise else FLATTEN_STEP_PX
+    FLATTEN_STEP = step_px / scale
 
 
 # --------------------------------------------------------------------------- #
@@ -144,7 +168,7 @@ def parse_stroke_width(value):
     if value is None:
         return 0
     match = re.match(r"[-+]?[0-9]*\.?[0-9]+", value.strip())
-    return int(round(float(match.group(0)))) if match else 0
+    return float(match.group(0)) if match else 0
 
 
 # --------------------------------------------------------------------------- #
@@ -426,7 +450,7 @@ def circle_subpath(cx, cy, r):
     never a circle's radius) shrinks them together with the rest of the image.
     The segment count scales with the radius so the outline stays smooth.
     """
-    segments = max(16, min(64, int(math.ceil(2 * math.pi * max(r, 0) / 1.5))))
+    segments = max(16, min(96, int(math.ceil(2 * math.pi * max(r, 0) / FLATTEN_STEP))))
     sp = Subpath()
     sp.closed = True
     for i in range(segments):
@@ -465,13 +489,18 @@ def rounded_rect_subpath(x, y, w, h, rx, ry):
 # PDC serialization
 # --------------------------------------------------------------------------- #
 def to_pebble_point(p):
-    """Match Pebble's coordinate convention.
+    """Scale an SVG point to output pixels and encode it for the PDC.
 
-    Pebble shifts each point by -0.5 and then rounds half-up, which nets out to
-    ``floor(value + eps)``; the epsilon guards against float dust on exact .5
-    inputs.
+    SVG puts (0, 0) at the top-left CORNER of the first pixel, Pebble at its
+    CENTRE, so every point shifts by -0.5 px. Integer paths then round half-up,
+    which nets out to ``floor(value + eps)`` (the epsilon guards against float
+    dust on exact .5 inputs). Precise paths keep the shifted value in 13.3
+    fixed point (1/8 px), so curves and diagonals stay smooth.
     """
-    return int(math.floor(p[0] + 1e-9)), int(math.floor(p[1] + 1e-9))
+    x, y = p[0] * SCALE, p[1] * SCALE
+    if PRECISE:
+        return int(round((x - 0.5) * 8)), int(round((y - 0.5) * 8))
+    return int(math.floor(x + 1e-9)), int(math.floor(y + 1e-9))
 
 
 def dedupe(points, closed):
@@ -504,7 +533,8 @@ class PathCommand:
         self.fill_color = fill_color
 
     def serialize(self):
-        return (struct.pack("<B", DRAW_COMMAND_TYPE_PATH)
+        command_type = DRAW_COMMAND_TYPE_PRECISE_PATH if PRECISE else DRAW_COMMAND_TYPE_PATH
+        return (struct.pack("<B", command_type)
                 + serialize_common(self.stroke_color, self.stroke_width, self.fill_color)
                 + struct.pack("<BB", 1 if self.is_open else 0, 0)
                 + serialize_points(self.points))
@@ -544,6 +574,8 @@ def build_commands(root, classes, normalize, body_rgb=BODY_RGB):
         fill_color = resolve_color(style.get("fill"), normalize, body_rgb)
         stroke_color = resolve_color(style.get("stroke"), normalize, body_rgb)
         stroke_width = parse_stroke_width(style.get("stroke-width"))
+        if stroke_width > 0:
+            stroke_width = max(1, int(round(stroke_width * SCALE)))
 
         if stroke_color == 0:
             stroke_width = 0
@@ -610,7 +642,7 @@ def convert_svg(path, normalize, body_rgb=BODY_RGB):
     commands = build_commands(root, classes, normalize, body_rgb)
 
     payload = struct.pack("<BBhh", DRAW_COMMAND_VERSION, 0,
-                          int(round(width)), int(round(height)))
+                          int(round(width * SCALE)), int(round(height * SCALE)))
     payload += struct.pack("<H", len(commands))
     for command in commands:
         payload += command.serialize()
@@ -642,6 +674,12 @@ def main():
     parser.add_argument("--name", default=None,
                         help="output filename for the single input (e.g. "
                              "batterylow.pdc); only valid with one input file")
+    parser.add_argument("--size", type=float, default=None,
+                        help="scale the artwork so its larger view-box side is "
+                             "SIZE pixels (default: 1 SVG unit = 1 pixel)")
+    parser.add_argument("--precise", action="store_true",
+                        help="emit precise paths (1/8 px fixed point) for "
+                             "smooth anti-aliased edges instead of integer points")
     args = parser.parse_args()
 
     if args.name is not None and len(args.inputs) != 1:
@@ -655,6 +693,11 @@ def main():
     failures = 0
     for src in args.inputs:
         try:
+            scale = 1.0
+            if args.size is not None:
+                vw, vh = get_viewbox_size(ET.parse(src).getroot())
+                scale = args.size / max(vw, vh)
+            configure(scale, args.precise)
             data, count = convert_svg(src, args.normalize, body_rgb)
         except Exception as exc:  # surface conversion errors as build failures
             print("ERROR converting {}: {}".format(src, exc), file=sys.stderr)
