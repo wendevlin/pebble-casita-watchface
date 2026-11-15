@@ -20,7 +20,7 @@ orchestrated with **Bun** via **Mise**. Artwork ships as **Pebble Draw Command**
 
 | Light theme | Dark theme |
 | :---: | :---: |
-| ![Casita watchface, light theme](screenshots/casita-light.jpg) | ![Casita watchface, dark theme](screenshots/casita-dark.jpg) |
+| ![Casita watchface, light theme](screenshots/emery_casita-light.jpg) | ![Casita watchface, dark theme](screenshots/emery_casita-dark.jpg) |
 
 ## Expressions
 
